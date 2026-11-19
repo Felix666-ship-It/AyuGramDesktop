@@ -68,6 +68,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/batch_download/batch_download.h"
 #include "api/api_blocked_peers.h"
 
 
@@ -360,6 +361,7 @@ void Session::finishLogout() {
 }
 
 Session::~Session() {
+	_batchDownload.reset();
 	unlockTerms();
 	data().clear();
 	ClickHandler::clearActive();
@@ -392,6 +394,15 @@ void Session::notifyDownloaderTaskFinished() {
 
 rpl::producer<> Session::downloaderTaskFinished() const {
 	return downloader().taskFinished();
+}
+
+AyuFeatures::BatchDownload::Manager &Session::batchDownload() {
+	if (!_batchDownload) {
+		_batchDownload = std::make_unique<
+			AyuFeatures::BatchDownload::Manager
+		>(this);
+	}
+	return *_batchDownload;
 }
 
 bool Session::premium() const {

@@ -59,6 +59,7 @@ public:
 		int canDeleteCount = 0;
 		int canForwardCount = 0;
 		int canSendNowCount = 0;
+		int canSaveMediaCount = 0;
 	};
 	using ActiveChat = Dialogs::EntryState;
 	using Section = ActiveChat::Section;
@@ -115,6 +116,9 @@ public:
 	}
 	[[nodiscard]] rpl::producer<> messageShotSelectionRequest() const {
 		return _messageShotSelection.events();
+	}
+	[[nodiscard]] rpl::producer<> batchDownloadSelectionRequest() const {
+		return _batchDownloadSelection.events();
 	}
 	[[nodiscard]] rpl::producer<> clearSelectionRequest() const {
 		return _clearSelection.events();
@@ -214,6 +218,7 @@ private:
 	void setChooseForReportReason(std::optional<Data::ReportInput>);
 	void toggleSelectedControls(bool shown);
 	[[nodiscard]] bool showSelectedActions() const;
+	void updateSelectedButtonsVisibility();
 
 	const not_null<Window::SessionController*> _controller;
 	const bool _primaryWindow = false;
@@ -230,6 +235,8 @@ private:
 	bool _canDelete = false;
 	bool _canForward = false;
 	bool _canSendNow = false;
+	bool _canSaveMedia = false;
+	int _saveMediaCount = 0;
 	bool _searchMode = false;
 
 	Ui::Animations::Simple _selectedShown;
@@ -237,6 +244,7 @@ private:
 
 	object_ptr<Ui::RoundButton> _clear;
 	object_ptr<Ui::RoundButton> _forward, _sendNow, _delete, _messageShot;
+	object_ptr<Ui::RoundButton> _download;
 	object_ptr<Ui::InputField> _searchField = { nullptr };
 	object_ptr<Ui::FadeWrapScaled<Ui::IconButton>> _chooseFromUser
 		= { nullptr };
@@ -288,6 +296,7 @@ private:
 	rpl::event_stream<> _sendNowSelection;
 	rpl::event_stream<> _deleteSelection;
 	rpl::event_stream<> _messageShotSelection;
+	rpl::event_stream<> _batchDownloadSelection;
 	rpl::event_stream<> _clearSelection;
 	rpl::event_stream<> _cancelChooseForReport;
 

@@ -84,6 +84,10 @@ namespace Ui {
 struct ColorIndicesCompressed;
 } // namespace Ui
 
+namespace AyuFeatures::BatchDownload {
+class Manager;
+} // namespace AyuFeatures::BatchDownload
+
 namespace Main {
 
 class Account;
@@ -252,6 +256,7 @@ public:
 	// Shortcuts.
 	void notifyDownloaderTaskFinished();
 	[[nodiscard]] rpl::producer<> downloaderTaskFinished() const;
+	[[nodiscard]] AyuFeatures::BatchDownload::Manager &batchDownload();
 	[[nodiscard]] MTP::DcId mainDcId() const;
 	[[nodiscard]] MTP::Instance &mtp() const;
 	[[nodiscard]] const MTP::ConfigFields &serverConfig() const;
@@ -368,6 +373,8 @@ private:
 	TimeId _tmpPasswordValidUntil = 0;
 
 	rpl::lifetime _lifetime;
+
+	std::unique_ptr<AyuFeatures::BatchDownload::Manager> _batchDownload;
 
 };
 

@@ -222,6 +222,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ayu/features/filters/filters_cache_controller.h"
 #include "ayu/utils/telegram_helpers.h"
 #include "ayu/features/message_shot/message_shot.h"
+#include "ayu/features/batch_download/batch_download.h"
 #include "ayu/features/forward/ayu_forward.h"
 #include "boxes/abstract_box.h"
 
@@ -1227,6 +1228,10 @@ HistoryWidget::HistoryWidget(
 	_topBar->messageShotSelectionRequest(
 	) | rpl::on_next([=] {
 		messageShotSelected();
+	}, _topBar->lifetime());
+	_topBar->batchDownloadSelectionRequest(
+	) | rpl::on_next([=] {
+		batchDownloadSelected();
 	}, _topBar->lifetime());
 	_topBar->clearSelectionRequest(
 	) | rpl::on_next([=] {
@@ -11041,6 +11046,20 @@ void HistoryWidget::messageShotSelected() {
 	AyuFeatures::MessageShot::Wrapper(
 		_list.data(),
 		[=] { clearSelected(); });
+}
+
+void HistoryWidget::batchDownloadSelected() {
+	if (!_list) {
+		return;
+	}
+	auto ids = _list->getSelectedItems();
+	if (ids.empty()) {
+		return;
+	}
+	session().batchDownload().chooseFolderAndStart(
+		controller(),
+		std::move(ids),
+		crl::guard(this, [=] { clearSelected(); }));
 }
 
 void HistoryWidget::escape() {

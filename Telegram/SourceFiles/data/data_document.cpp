@@ -1054,6 +1054,7 @@ void DocumentData::finishLoad() {
 	// NB! _loader may be in ~FileLoader() already.
 	const auto guard = gsl::finally([&] {
 		destroyLoader();
+		_reportSaveFailure = true;
 	});
 	if (!_loader || _loader->cancelled()) {
 		_flags |= Flag::DownloadCancelled;
@@ -1227,8 +1228,10 @@ void DocumentData::save(
 		Data::FileOrigin origin,
 		const QString &toFile,
 		LoadFromCloudSetting fromCloud,
-		bool autoLoading) {
+		bool autoLoading,
+		bool reportFailure) {
 	Test::NotifyDocumentSave(this, toFile, autoLoading);
+	_reportSaveFailure = reportFailure;
 	if (const auto media = activeMediaView(); media && media->loaded(true)) {
 		const auto &l = location(true);
 		if (!toFile.isEmpty()) {
@@ -1252,12 +1255,14 @@ void DocumentData::save(
 				l.accessDisable();
 			}
 		}
+		_reportSaveFailure = true;
 		return;
 	}
 
 	if (_loader) {
 		if (!_loader->setFileName(toFile)) {
 			cancel();
+			_reportSaveFailure = reportFailure;
 		}
 	}
 	resetCancelled();
@@ -1327,6 +1332,8 @@ void DocumentData::save(
 	}
 	if (loading()) {
 		_loader->start();
+	} else {
+		_reportSaveFailure = true;
 	}
 	// This affects a display of tooltips.
 	// _owner->notifyDocumentLayoutChanged(this);
@@ -1338,7 +1345,7 @@ void DocumentData::handleLoaderUpdates() {
 		_owner->documentLoadProgress(this);
 	}, [=](FileLoader::Error error) {
 		using FailureReason = FileLoader::FailureReason;
-		if (error.started && _loader) {
+		if (error.started && _loader && _reportSaveFailure) {
 			const auto origin = _loader->fileOrigin();
 			const auto failedFileName = _loader->fileName();
 			const auto retry = [=] {
@@ -1349,7 +1356,8 @@ void DocumentData::handleLoaderUpdates() {
 				tr::lng_download_finish_failed(),
 				crl::guard(&session(), retry)
 			}));
-		} else if (error.failureReason == FailureReason::FileWriteFailure) {
+		} else if (error.failureReason == FailureReason::FileWriteFailure
+			&& _reportSaveFailure) {
 			if (!Core::App().settings().downloadPath().isEmpty()) {
 				Core::App().settings().setDownloadPathBookmark(QByteArray());
 				Core::App().settings().setDownloadPath(QString());
@@ -1379,6 +1387,7 @@ void DocumentData::cancel() {
 
 	_flags |= Flag::DownloadCancelled;
 	destroyLoader();
+	_reportSaveFailure = true;
 	_owner->documentLoadDone(this);
 }
 

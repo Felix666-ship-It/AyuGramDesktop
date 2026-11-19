@@ -223,6 +223,8 @@ set(ayugram_files
         ayu/features/message_shot/message_shot.h
         ayu/features/message_shot/message_shot_theme_state.cpp
         ayu/features/message_shot/message_shot_theme_state.h
+        ayu/features/batch_download/batch_download.cpp
+        ayu/features/batch_download/batch_download.h
         ayu/features/forward/ayu_forward.cpp
         ayu/features/forward/ayu_forward.h
         ayu/features/forward/ayu_forward_rich.cpp

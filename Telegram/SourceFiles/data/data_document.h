@@ -145,7 +145,8 @@ public:
 		Data::FileOrigin origin,
 		const QString &toFile,
 		LoadFromCloudSetting fromCloud = LoadFromCloudOrLocal,
-		bool autoLoading = false);
+		bool autoLoading = false,
+		bool reportFailure = true);
 	void cancel();
 	[[nodiscard]] bool cancelled() const;
 	void resetCancelled();
@@ -412,6 +413,7 @@ private:
 	Core::FileLocation _location;
 	std::unique_ptr<DocumentAdditionalData> _additional;
 	mutable Flags _flags = kStreamingSupportedUnknown;
+	bool _reportSaveFailure = true;
 	GoodThumbnailState _goodThumbnailState = GoodThumbnailState();
 	Core::NameType _nameType = Core::NameType();
 	std::unique_ptr<FileLoader> _loader;

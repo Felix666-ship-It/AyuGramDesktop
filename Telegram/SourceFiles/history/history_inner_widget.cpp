@@ -138,6 +138,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/batch_download/batch_download.h"
 #include "ayu/features/filters/filters_cache_controller.h"
 #include "ayu/ui/context_menu/context_menu.h"
 #include "ayu/ui/settings/filters/edit_filter.h"
@@ -3520,6 +3521,20 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconDelete);
 			}
 			addUnpinSelectedAction();
+			if (selectedState.canSaveMediaCount > 0) {
+				_menu->addAction(
+					tr::ayu_BatchDownload(tr::now),
+					[=] {
+						controller->session().batchDownload()
+							.chooseFolderAndStart(
+								controller,
+								getSelectedItems(),
+								crl::guard(this, [=] {
+									_widget->clearSelected();
+								}));
+					},
+					&st::menuIconDownload);
+			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
 				Menu::AddDownloadFilesAction(
 					_menu,
@@ -3837,6 +3852,20 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 				}, &st::menuIconDelete);
 			}
 			addUnpinSelectedAction();
+			if (selectedState.canSaveMediaCount > 0) {
+				_menu->addAction(
+					tr::ayu_BatchDownload(tr::now),
+					[=] {
+						controller->session().batchDownload()
+							.chooseFolderAndStart(
+								controller,
+								getSelectedItems(),
+								crl::guard(this, [=] {
+									_widget->clearSelected();
+								}));
+					},
+					&st::menuIconDownload);
+			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
 				Menu::AddDownloadFilesAction(
 					_menu,
@@ -5353,6 +5382,9 @@ auto HistoryInner::getSelectionState() const
 		}
 		if (item->allowsForward()) {
 			++result.canForwardCount;
+		}
+		if (AyuFeatures::BatchDownload::IsDownloadableMedia(item->media())) {
+			++result.canSaveMediaCount;
 		}
 	}
 	result.textSelected = hasSelectedText()

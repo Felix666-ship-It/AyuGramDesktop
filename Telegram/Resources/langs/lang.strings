@@ -9128,6 +9128,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_MessageShotShowHeaderDecorations" = "Show header decorations";
 "ayu_MessageShotShowColorfulReplies" = "Show colorful replies";
 "ayu_MessageShotRevealSpoilers" = "Reveal spoilers";
+"ayu_BatchDownloadTopBarText" = "Download";
+"ayu_BatchDownload" = "Download to folder...";
+"ayu_BatchDownloadStarted" = "Downloading media to the selected folder...";
+"ayu_BatchDownloadSaved" = "Saved {count} file(s) to the selected folder";
+"ayu_BatchDownloadPartial" = "Saved {saved} file(s), {failed} failed";
 "ayu_SendAsSticker" = "Send as Sticker";
 "ayu_SendWithSound" = "Send With Sound";
 "ayu_AyuForwardStatusPreparing" = "Forwarding messages";
