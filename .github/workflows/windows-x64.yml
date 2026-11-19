@@ -1,0 +1,102 @@
+name: Windows x64
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    env:
+      Platform: x64
+      TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID || '2040' }}
+      TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH || 'b18441a1ff607e10a989891a5462e627' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Verify toolchain
+        shell: pwsh
+        run: |
+          where.exe cl
+          where.exe cmake
+          where.exe python
+          cl 2>&1 | Select-Object -First 1
+          cmake --version
+          python --version
+
+      - name: Restore dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ../Libraries
+            ../ThirdParty
+          key: windows-x64-deps-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}
+          restore-keys: |
+            windows-x64-deps-
+
+      - name: Patch MSYS2 package name for CI
+        shell: pwsh
+        run: |
+          $path = 'Telegram/build/prepare/prepare.py'
+          $text = Get-Content -Raw -LiteralPath $path
+          $patched = $text.Replace('mingw-w64-x86_64-diffutils', 'diffutils')
+          Set-Content -LiteralPath $path -Value $patched -NoNewline
+
+      - name: Prepare third-party dependencies
+        shell: cmd
+        run: Telegram\build\prepare\win.bat silent
+
+      - name: Configure
+        shell: cmd
+        working-directory: Telegram
+        run: configure.bat x64 -D TDESKTOP_API_ID=%TDESKTOP_API_ID% -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH%
+
+      - name: Build Release
+        shell: cmd
+        run: cmake --build out --config Release --target Telegram --parallel 4
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'out/Release/AyuGram.exe')) {
+            throw 'out/Release/AyuGram.exe was not produced'
+          }
+          Get-Item 'out/Release/AyuGram.exe' | Format-List FullName,Length,LastWriteTime
+
+      - name: Upload unsigned build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-Windows-x64
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            out/Release/AyuGram.exe
+            out/Release/*.dll
+            out/Release/modules/**
