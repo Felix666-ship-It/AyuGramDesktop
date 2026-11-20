@@ -25,6 +25,7 @@ jobs:
       Platform: x64
       API_ID: ${{ secrets.API_ID }}
       API_HASH: ${{ secrets.API_HASH }}
+      UPDATES_PRIVATE_KEY: ${{ secrets.UPDATES_PRIVATE_KEY }}
 
     steps:
       - name: Checkout
@@ -33,19 +34,33 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Resolve mod version
-        id: version
+      - name: Resolve build metadata
         shell: pwsh
         run: |
+          $workspace = $env:GITHUB_WORKSPACE
+          $depsRoot = Split-Path -Parent $workspace
+          "DEPS_ROOT=$depsRoot" >> $env:GITHUB_ENV
+
           $refName = '${{ github.ref_name }}'
-          if ('${{ github.ref }}' -like 'refs/tags/v*') {
+          $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
+          if ($isTag) {
             $version = $refName.Substring(1)
+            $parts = $version.Split('.')
+            $major = if ($parts.Count -gt 0) { [int]$parts[0] } else { 0 }
+            $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
+            $patch = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
+            $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
+            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002009 }
+            $numeric = $appVersion + ($major * 1000000) + ($minor * 1000) + $patch
           } else {
-            $version = '1.0.0'
+            $version = '0.0.0'
+            $numeric = 0
           }
-          $package = 'AyuGramMod-Windows-x64-' + ($refName -replace '[^A-Za-z0-9._-]', '-')
-          "AYU_MOD_VERSION=$version" >> $env:GITHUB_ENV
-          "PACKAGE_NAME=$package" >> $env:GITHUB_ENV
+          $suffix = ($refName -replace '[^A-Za-z0-9._-]', '-')
+          "AYU_VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_VERSION=$numeric" >> $env:GITHUB_ENV
+          "PACKAGE_NAME=AyuGramMod-Portable-x64-$suffix" >> $env:GITHUB_ENV
+          "SETUP_NAME=AyuGramMod-Setup-x64-$suffix" >> $env:GITHUB_ENV
 
       - name: Free disk space
         shell: pwsh
@@ -92,8 +107,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            ../Libraries
-            ../ThirdParty
+            ${{ env.DEPS_ROOT }}/Libraries
+            ${{ env.DEPS_ROOT }}/ThirdParty
           key: win-x64-deps-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}
           restore-keys: |
             win-x64-deps-
@@ -107,17 +122,73 @@ jobs:
           Set-Content -LiteralPath $path -Value $patched -NoNewline
 
       - name: Prepare third-party dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
         shell: cmd
         run: Telegram\build\prepare\win.bat silent
+
+      - name: Report and trim dependency cache
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem $env:DEPS_ROOT -Directory |
+            ForEach-Object {
+              $size = (Get-ChildItem $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                Measure-Object Length -Sum).Sum
+              [pscustomobject]@{
+                Name = $_.Name
+                SizeGB = [math]::Round($size / 1GB, 2)
+              }
+            } | Format-Table -AutoSize
+
+          Get-ChildItem $env:DEPS_ROOT -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Extension -in '.zip', '.7z', '.tar', '.gz', '.xz'
+            } | Remove-Item -Force -ErrorAction SilentlyContinue
 
       - name: Save dependencies cache
         if: steps.deps-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
-            ../Libraries
-            ../ThirdParty
+            ${{ env.DEPS_ROOT }}/Libraries
+            ${{ env.DEPS_ROOT }}/ThirdParty
           key: win-x64-deps-${{ hashFiles('Telegram/build/prepare/prepare.py', 'Telegram/build/qt_version.py') }}
+
+      - name: Generate Packer private key header
+        shell: pwsh
+        run: |
+          $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
+          $secret = $env:UPDATES_PRIVATE_KEY
+          if ($isTag -and [string]::IsNullOrWhiteSpace($secret)) {
+            throw 'UPDATES_PRIVATE_KEY is required for tag releases.'
+          }
+
+          $pem = ''
+          if (-not [string]::IsNullOrWhiteSpace($secret)) {
+            $pemPath = Join-Path $env:RUNNER_TEMP 'updates-private.pem'
+            $rsaPath = Join-Path $env:RUNNER_TEMP 'updates-private-rsa.pem'
+            [IO.File]::WriteAllText($pemPath, $secret, [Text.UTF8Encoding]::new($false))
+
+            $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
+            if (!(Test-Path $openssl)) {
+              $openssl = (Get-Command openssl.exe -ErrorAction SilentlyContinue).Source
+            }
+            if ($openssl) {
+              & $openssl rsa -in $pemPath -traditional -out $rsaPath 2>$null
+            }
+            if ((Test-Path $rsaPath) -and ((Get-Item $rsaPath).Length -gt 0)) {
+              $pem = Get-Content -Raw -LiteralPath $rsaPath
+            } else {
+              $pem = $secret
+            }
+            Remove-Item $pemPath, $rsaPath -Force -ErrorAction SilentlyContinue
+          }
+
+          $escaped = $pem.Replace('\', '\\').Replace('"', '\"')
+          $escaped = $escaped.Replace("`r`n", '\n').Replace("`n", '\n')
+          $header = 'const char *PrivateKey = "' + $escaped + '";' + "`n" +
+            'const char *PrivateBetaKey = "' + $escaped + '";' + "`n"
+          Set-Content -LiteralPath 'Telegram/SourceFiles/_other/packer_private.h' -Value $header -NoNewline
 
       - name: Validate API secrets
         shell: pwsh
@@ -130,35 +201,116 @@ jobs:
       - name: Configure
         shell: cmd
         working-directory: Telegram
-        run: configure.bat x64 -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D AYU_MOD_VERSION=%AYU_MOD_VERSION%
+        run: configure.bat x64 -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF
 
       - name: Build Release
         shell: cmd
-        run: cmake --build out --config Release --target Telegram --parallel 4
+        run: cmake --build out --config Release --target Telegram Updater Packer --parallel 4
 
-      - name: Verify executable
+      - name: Remove generated signing header
+        if: always()
+        shell: pwsh
+        run: Remove-Item 'Telegram/SourceFiles/_other/packer_private.h' -Force -ErrorAction SilentlyContinue
+
+      - name: Verify binaries
         shell: pwsh
         run: |
-          if (!(Test-Path 'out/Release/AyuGram.exe')) {
-            throw 'out/Release/AyuGram.exe was not produced'
+          foreach ($name in 'AyuGram.exe', 'Updater.exe', 'Packer.exe') {
+            $path = Join-Path 'out/Release' $name
+            if (!(Test-Path $path)) {
+              throw "$name was not produced"
+            }
+            Get-Item $path | Format-List FullName,Length,LastWriteTime
           }
-          Get-Item 'out/Release/AyuGram.exe' | Format-List FullName,Length,LastWriteTime
 
-      - name: Package release zip
+      - name: Build portable package
         shell: pwsh
         run: |
-          $stage = 'out/package'
+          $stage = 'out/portable'
           if (Test-Path $stage) {
             Remove-Item $stage -Recurse -Force
           }
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item 'out/Release/*.exe' $stage
+          Copy-Item 'out/Release/AyuGram.exe' $stage
+          Copy-Item 'out/Release/Updater.exe' $stage
           Copy-Item 'out/Release/*.dll' $stage
           if (Test-Path 'out/Release/modules') {
             Copy-Item 'out/Release/modules' $stage -Recurse
           }
           Compress-Archive -Path "$stage/*" -DestinationPath "$env:PACKAGE_NAME.zip" -Force
           Get-Item "$env:PACKAGE_NAME.zip" | Format-List FullName,Length
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if (!$iscc) {
+            $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          }
+          if (!(Test-Path $iscc)) {
+            throw 'Inno Setup ISCC.exe was not found on the runner.'
+          }
+          $releasePath = (Resolve-Path 'out/Release').Path
+          $root = (Get-Location).Path
+          & $iscc "/DMyAppVersion=$env:AYU_VERSION" `
+            "/DReleasePath=$releasePath" `
+            "/DOutputDir=$root" `
+            "/DOutputBaseFilename=$env:SETUP_NAME" `
+            'Telegram\build\setup_ayu_mod.iss'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Inno Setup compilation failed.'
+          }
+          Get-Item "$env:SETUP_NAME.exe" | Format-List FullName,Length
+
+      - name: Build signed native update
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          if ([int]$env:RELEASE_VERSION -le 0) {
+            throw 'Tag must contain a valid numeric version.'
+          }
+          $stage = 'out/update'
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item 'out/Release/AyuGram.exe' $stage
+          Copy-Item 'out/Release/Updater.exe' $stage
+          Copy-Item 'out/Release/*.dll' $stage
+          if (Test-Path 'out/Release/modules') {
+            Copy-Item 'out/Release/modules' $stage -Recurse
+          }
+
+          Push-Location 'out/Release'
+          try {
+            $updatePath = (Resolve-Path '..\update').Path
+            & '.\Packer.exe' -path $updatePath -target win64 -version $env:RELEASE_VERSION
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Packer signing failed.'
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $updateFile = "out/Release/tx64upd$env:RELEASE_VERSION"
+          if (!(Test-Path $updateFile)) {
+            throw "Packer output not found: $updateFile"
+          }
+          Move-Item $updateFile "tx64upd$env:RELEASE_VERSION" -Force
+
+          $current = [ordered]@{
+            win64 = [ordered]@{
+              stable = [ordered]@{
+                released = [int]$env:RELEASE_VERSION
+                link = "tx64upd$env:RELEASE_VERSION"
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+          [IO.File]::WriteAllText(
+            (Join-Path (Get-Location).Path 'current'),
+            $current,
+            [Text.UTF8Encoding]::new($false))
+          Get-Content 'current'
 
       - name: Upload unsigned build
         uses: actions/upload-artifact@v4
@@ -170,13 +322,20 @@ jobs:
             out/Release/*.exe
             out/Release/*.dll
             out/Release/modules/**
-            AyuGramMod-Windows-x64-*.zip
+            AyuGramMod-Portable-x64-*.zip
+            AyuGramMod-Setup-x64-*.exe
+            tx64upd*
+            current
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: AyuGramMod-Windows-x64-*.zip
+          files: |
+            AyuGramMod-Portable-x64-*.zip
+            AyuGramMod-Setup-x64-*.exe
+            tx64upd*
+            current
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

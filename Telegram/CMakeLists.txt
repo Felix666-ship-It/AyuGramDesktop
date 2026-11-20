@@ -241,8 +241,6 @@ set(ayugram_files
         ayu/features/translator/implementations/google.h
         ayu/features/translator/implementations/yandex.cpp
         ayu/features/translator/implementations/yandex.h
-        ayu/features/updates/ayu_update_checker.cpp
-        ayu/features/updates/ayu_update_checker.h
         ayu/features/translator/implementations/base.cpp
         ayu/features/translator/implementations/base.h
         ayu/features/filters/filters_controller.cpp

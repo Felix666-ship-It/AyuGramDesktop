@@ -31,17 +31,23 @@ Core::Updates::Target V2Target;
 
 const char *PublicKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
-MIGJAoGBAOIENxe1sfT2t7b+HUMpnT6RnN/sCqY0JjK7/1A/59daDc6i/K4023jw\n\
-Us+187Pa2VSaPh3kDywp9PfLDFgFiPTD9BsBvpaSK9p3zyG8k6an3+GbUTlUgmFv\n\
-eI0pg7vmceIl0Lcy9nndfEx27UQId3Y3dQTMuwwFYGtjJAMHNNq5AgMBAAE=\n\
+MIIBCgKCAQEA6AvMd4s1NV4WG9OUL2nJ8FvA28g5Nu9kR91Kzzc2CpGGXxkDzXgK\n\
+bVPa764pvJLonWVWeFCaztbFGpdQHQ8PWX7QQUFl5LrQmWeeGOvxWa+kqouYDQnv\n\
+jiRJcVrtIo7Qfe71W5l3Lzpm4cvCTvNqsL/R462XB4EKkQbHi4lGhK/zYiII5Vnx\n\
+e9OOq9JGKOMBYjCMf3pkKPq8KUN4XmlqeAMz9yDMegZhtpMdE/9Rt+0LOTluqjPf\n\
+RRvIXx4FSHwD7juaat6a5+CZD5CL46THA/4rVTAagLUS4lh0ztftotOl3q1SD8KC\n\
+InSftdc61Cu8WplfvpuhSZ9K3Ecrat8v8wIDAQAB\n\
 -----END RSA PUBLIC KEY-----\
 ";
 
 const char *PublicBetaKey = "\
 -----BEGIN RSA PUBLIC KEY-----\n\
-MIGJAoGBALWu9GGs0HED7KG7BM73CFZ6o0xufKBRQsdnq3lwA8nFQEvmdu+g/I1j\n\
-0LQ+0IQO7GW4jAgzF/4+soPDb6uHQeNFrlVx1JS9DZGhhjZ5rf65yg11nTCIHZCG\n\
-w/CVnbwQOw0g5GBwwFV3r0uTTvy44xx8XXxk+Qknu4eBCsmrAFNnAgMBAAE=\n\
+MIIBCgKCAQEA6AvMd4s1NV4WG9OUL2nJ8FvA28g5Nu9kR91Kzzc2CpGGXxkDzXgK\n\
+bVPa764pvJLonWVWeFCaztbFGpdQHQ8PWX7QQUFl5LrQmWeeGOvxWa+kqouYDQnv\n\
+jiRJcVrtIo7Qfe71W5l3Lzpm4cvCTvNqsL/R462XB4EKkQbHi4lGhK/zYiII5Vnx\n\
+e9OOq9JGKOMBYjCMf3pkKPq8KUN4XmlqeAMz9yDMegZhtpMdE/9Rt+0LOTluqjPf\n\
+RRvIXx4FSHwD7juaat6a5+CZD5CL46THA/4rVTAagLUS4lh0ztftotOl3q1SD8KC\n\
+InSftdc61Cu8WplfvpuhSZ9K3Ecrat8v8wIDAQAB\n\
 -----END RSA PUBLIC KEY-----\
 ";
 
@@ -789,7 +795,7 @@ int main(int argc, char *argv[])
 
 	QByteArray compressed, resultCheck;
 #if defined Q_OS_WIN && !defined PACKER_USE_PACKAGED // use Lzma SDK for win
-	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = LZMA_PROPS_SIZE, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hPropsLen + hOriginalSizeLen; // header
+	const int32 hSigLen = 256, hShaLen = 20, hPropsLen = LZMA_PROPS_SIZE, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hPropsLen + hOriginalSizeLen; // header
 
 	compressed.resize(hSize + resultSize + 1024 * 1024); // rsa signature + sha1 + lzma props + max compressed size
 
@@ -832,7 +838,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 #else // use liblzma for others
-	const int32 hSigLen = 128, hShaLen = 20, hPropsLen = 0, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hOriginalSizeLen; // header
+	const int32 hSigLen = 256, hShaLen = 20, hPropsLen = 0, hOriginalSizeLen = sizeof(int32), hSize = hSigLen + hShaLen + hOriginalSizeLen; // header
 
 	compressed.resize(hSize + resultSize + 1024 * 1024); // rsa signature + sha1 + lzma props + max compressed size
 

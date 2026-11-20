@@ -8,7 +8,6 @@
 
 #include "lang_auto.h"
 #include "ayu/ayu_settings.h"
-#include "ayu/features/updates/ayu_update_checker.h"
 #include "ayu/ui/boxes/donate_qr_box.h"
 #include "ayu/ui/settings/ayu_builder.h"
 #include "ayu/ui/settings/settings_ayu_utils.h"
@@ -198,14 +197,6 @@ void BuildOtherThings(SectionBuilder &builder) {
 	const auto controller = builder.controller();
 
 	builder.addSkip();
-	builder.addButton({
-		.id = u"ayu/checkUpdates"_q,
-		.title = tr::ayu_CheckForUpdates(),
-		.icon = { &st::menuIconRestore },
-		.onClick = [=] {
-			AyuUpdate::CheckNow(true);
-		},
-	});
 builder.addButton({
 		.id = u"ayu/registerUrlScheme"_q,
 		.title = tr::ayu_RegisterURLScheme(),

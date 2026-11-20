@@ -35,8 +35,6 @@
 namespace AyuFeatures::BatchDownload {
 namespace {
 
-constexpr auto kMaxConcurrentDownloads = 3;
-
 [[nodiscard]] QString FolderWithSlash(const QString &folder) {
 	return folder.endsWith('/') ? folder : (folder + '/');
 }
@@ -89,12 +87,18 @@ constexpr auto kMaxConcurrentDownloads = 3;
 		extension = u"."_q + extension;
 	}
 	const auto prefix = FolderWithSlash(folder);
+	const auto isBusy = [&](const QString &path) {
+		return QFileInfo::exists(path)
+			|| reserved.contains(path.toCaseFolded());
+	};
 	auto candidate = prefix + base + extension;
-	for (auto i = 1;
-		QFileInfo::exists(candidate)
-			|| reserved.contains(candidate.toCaseFolded());
-		++i) {
-		candidate = prefix + base + u" (%1)"_q.arg(i) + extension;
+	if (isBusy(candidate)) {
+		candidate = prefix + base + u" - 副本"_q + extension;
+		for (auto i = 2; isBusy(candidate); ++i) {
+			candidate = prefix + base
+				+ u" - 副本 (%1)"_q.arg(i)
+				+ extension;
+		}
 	}
 	reserved.insert(candidate.toCaseFolded());
 	return candidate;
@@ -215,9 +219,12 @@ private:
 	};
 
 	void advance() {
-		while (!_finished
-			&& int(_currents.size()) < kMaxConcurrentDownloads) {
-			if (_index >= int(_ids.size())) {
+		if (_advancing || _finished) {
+			return;
+		}
+		_advancing = true;
+		while (true) {
+			if (_finished || _index >= int(_ids.size())) {
 				break;
 			}
 			const auto id = _ids[_index++];
@@ -256,13 +263,14 @@ private:
 				current->path = UniquePath(
 					_folder,
 					DocumentName(document, id),
-					_reserved);
+					_reservedPaths);
 				_currents.push_back(current);
 				prepareDocument(current);
 			} else {
 				++_skipped;
 			}
 		}
+		_advancing = false;
 		if (!_finished && _currents.empty() && _index >= int(_ids.size())) {
 			finish();
 		}
@@ -428,7 +436,7 @@ private:
 		current->path = UniquePath(
 			_folder,
 			PhotoBaseName(current->id) + extension,
-			_reserved);
+			_reservedPaths);
 		if (media->saveToFile(current->path)) {
 			finishCurrent(current, true);
 		} else {
@@ -530,13 +538,14 @@ private:
 	const MessageIdsList _ids;
 	const Fn<void()> _onFinished;
 	rpl::lifetime _lifetime;
-	QSet<QString> _reserved;
+	QSet<QString> _reservedPaths;
 	std::vector<std::shared_ptr<Current>> _currents;
 	int _index = 0;
 	int _saved = 0;
 	int _failed = 0;
 	int _skipped = 0;
 	uint64 _generation = 0;
+	bool _advancing = false;
 	bool _finished = false;
 };
 

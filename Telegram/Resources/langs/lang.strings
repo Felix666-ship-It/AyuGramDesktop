@@ -9128,12 +9128,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_MessageShotShowHeaderDecorations" = "Show header decorations";
 "ayu_MessageShotShowColorfulReplies" = "Show colorful replies";
 "ayu_MessageShotRevealSpoilers" = "Reveal spoilers";
-"ayu_BatchDownloadTopBarText" = "Download";
-"ayu_BatchDownload" = "Download to folder...";
-"ayu_BatchDownloadStarted" = "Downloading media to the selected folder...";
-"ayu_BatchDownloadSaved#one" = "Saved {count} file to the selected folder";
-"ayu_BatchDownloadSaved#other" = "Saved {count} files to the selected folder";
-"ayu_BatchDownloadPartial" = "Saved {saved} file(s), {failed} failed";
+"ayu_BatchDownloadTopBarText" = "批量下载";
+"ayu_BatchDownload" = "批量下载";
+"ayu_BatchDownloadStarted" = "已开始批量下载";
+"ayu_BatchDownloadSaved#one" = "已保存 {count} 个文件到所选文件夹";
+"ayu_BatchDownloadSaved#other" = "已保存 {count} 个文件到所选文件夹";
+"ayu_BatchDownloadPartial" = "已保存 {saved} 个文件，{failed} 个失败";
 "ayu_SendAsSticker" = "Send as Sticker";
 "ayu_SendWithSound" = "Send With Sound";
 "ayu_AyuForwardStatusPreparing" = "Forwarding messages";
@@ -9196,8 +9196,4 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_IntroAbout" = "Welcome to the AyuGram Desktop.\nMake Telegram your own.";
 "ayu_AboutText1" = "ToS breaking Telegram client based on {api_link}.";
 "ayu_UpdateAyuGram" = "Update AyuGram";
-"ayu_CheckForUpdates" = "Check for Updates";
-"ayu_UpdateAvailable" = "AyuGramMod {version} is available. Click to open the release.";
-"ayu_UpdateLatest" = "You are using the latest version.";
-"ayu_UpdateCheckFailed" = "Could not check for updates.";
 "ayu_UtilityRestartRequired" = "The app will close in 5 seconds.";
