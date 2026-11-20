@@ -9196,4 +9196,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_IntroAbout" = "Welcome to the AyuGram Desktop.\nMake Telegram your own.";
 "ayu_AboutText1" = "ToS breaking Telegram client based on {api_link}.";
 "ayu_UpdateAyuGram" = "Update AyuGram";
+"ayu_CheckForUpdates" = "Check for Updates";
+"ayu_UpdateAvailable" = "AyuGramMod {version} is available. Click to open the release.";
+"ayu_UpdateLatest" = "You are using the latest version.";
+"ayu_UpdateCheckFailed" = "Could not check for updates.";
 "ayu_UtilityRestartRequired" = "The app will close in 5 seconds.";

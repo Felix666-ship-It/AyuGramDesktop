@@ -8,6 +8,9 @@ option(TDESKTOP_API_TEST "Use test API credentials." OFF)
 set(TDESKTOP_API_ID "0" CACHE STRING "Provide 'api_id' for the Telegram API access.")
 set(TDESKTOP_API_HASH "" CACHE STRING "Provide 'api_hash' for the Telegram API access.")
 
+set(AYU_MOD_VERSION "1.0.0" CACHE STRING "AyuGram mod version shown in update checks.")
+target_compile_definitions(Telegram PRIVATE AYU_MOD_VERSION="${AYU_MOD_VERSION}")
+
 if (TDESKTOP_API_TEST)
     set(TDESKTOP_API_ID 17349)
     set(TDESKTOP_API_HASH 344583e45741c457fe1862106095a5eb)

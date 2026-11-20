@@ -5,9 +5,11 @@ on:
   push:
     branches:
       - feature/batch-download-media
+    tags:
+      - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-win-x64-${{ github.ref }}
@@ -30,6 +32,20 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 1
+
+      - name: Resolve mod version
+        id: version
+        shell: pwsh
+        run: |
+          $refName = '${{ github.ref_name }}'
+          if ('${{ github.ref }}' -like 'refs/tags/v*') {
+            $version = $refName.Substring(1)
+          } else {
+            $version = '1.0.0'
+          }
+          $package = 'AyuGramMod-Windows-x64-' + ($refName -replace '[^A-Za-z0-9._-]', '-')
+          "AYU_MOD_VERSION=$version" >> $env:GITHUB_ENV
+          "PACKAGE_NAME=$package" >> $env:GITHUB_ENV
 
       - name: Free disk space
         shell: pwsh
@@ -114,7 +130,7 @@ jobs:
       - name: Configure
         shell: cmd
         working-directory: Telegram
-        run: configure.bat x64 -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH%
+        run: configure.bat x64 -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D AYU_MOD_VERSION=%AYU_MOD_VERSION%
 
       - name: Build Release
         shell: cmd
@@ -128,6 +144,22 @@ jobs:
           }
           Get-Item 'out/Release/AyuGram.exe' | Format-List FullName,Length,LastWriteTime
 
+      - name: Package release zip
+        shell: pwsh
+        run: |
+          $stage = 'out/package'
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item 'out/Release/*.exe' $stage
+          Copy-Item 'out/Release/*.dll' $stage
+          if (Test-Path 'out/Release/modules') {
+            Copy-Item 'out/Release/modules' $stage -Recurse
+          }
+          Compress-Archive -Path "$stage/*" -DestinationPath "$env:PACKAGE_NAME.zip" -Force
+          Get-Item "$env:PACKAGE_NAME.zip" | Format-List FullName,Length
+
       - name: Upload unsigned build
         uses: actions/upload-artifact@v4
         with:
@@ -138,3 +170,13 @@ jobs:
             out/Release/*.exe
             out/Release/*.dll
             out/Release/modules/**
+            AyuGramMod-Windows-x64-*.zip
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AyuGramMod-Windows-x64-*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

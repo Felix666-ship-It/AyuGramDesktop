@@ -27,11 +27,15 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QSet>
 
+#include <algorithm>
 #include <deque>
 #include <memory>
+#include <vector>
 
 namespace AyuFeatures::BatchDownload {
 namespace {
+
+constexpr auto kMaxConcurrentDownloads = 3;
 
 [[nodiscard]] QString FolderWithSlash(const QString &folder) {
 	return folder.endsWith('/') ? folder : (folder + '/');
@@ -125,14 +129,16 @@ public:
 
 	~Task() {
 		_lifetime.destroy();
-		if (_current.active
-			&& _current.kind == Kind::Document
-			&& _current.state == State::WaitingDownload
-			&& _current.document) {
-			_current.document->cancel();
-		}
-		if (_current.active && !_current.path.isEmpty()) {
-			QFile::remove(_current.path);
+		for (const auto &current : _currents) {
+			if (current->active
+				&& current->kind == Kind::Document
+				&& current->state == State::WaitingDownload
+				&& current->document) {
+				current->document->cancel();
+			}
+			if (current->active && !current->path.isEmpty()) {
+				QFile::remove(current->path);
+			}
 		}
 	}
 
@@ -142,51 +148,40 @@ public:
 		}
 		if (!QDir().mkpath(_folder)) {
 			_failed = int(_ids.size());
+			_index = int(_ids.size());
 			finish();
 			return;
 		}
 
 		_session->data().documentLoadProgress(
 		) | rpl::on_next([this](not_null<DocumentData*> document) {
-			if (_inStart) {
+			const auto i = findDocument(document.get());
+			if (i < 0 || _currents[i]->starting) {
 				return;
 			}
-			if (_current.active
-				&& _current.kind == Kind::Document
-				&& _current.document == document.get()) {
-				checkCurrent();
-				if (!_current.active) {
-					advance();
-				}
-			}
+			checkCurrent(_currents[i]);
+			advance();
 		}, _lifetime);
 
 		_session->data().photoLoadProgress(
 		) | rpl::on_next([this](not_null<PhotoData*> photo) {
-			if (_inStart) {
+			const auto i = findPhoto(photo.get());
+			if (i < 0 || _currents[i]->starting) {
 				return;
 			}
-			if (_current.active
-				&& _current.kind == Kind::Photo
-				&& _current.photo == photo.get()) {
-				checkCurrent();
-				if (!_current.active) {
-					advance();
-				}
-			}
+			checkCurrent(_currents[i]);
+			advance();
 		}, _lifetime);
 
 		_session->downloaderTaskFinished(
 		) | rpl::on_next([this] {
-			if (_inStart) {
-				return;
-			}
-			if (_current.active) {
-				checkCurrent();
-				if (!_current.active) {
-					advance();
+			const auto currents = _currents;
+			for (const auto &current : currents) {
+				if (current->active) {
+					checkCurrent(current);
 				}
 			}
+			advance();
 		}, _lifetime);
 
 		if (!_ids.empty()) {
@@ -206,7 +201,8 @@ private:
 		WaitingDownload,
 	};
 	struct Current {
-		bool active = false;
+		bool active = true;
+		bool starting = false;
 		Kind kind = Kind::Document;
 		State state = State::None;
 		FullMsgId id;
@@ -219,10 +215,10 @@ private:
 	};
 
 	void advance() {
-		while (!_finished && !_current.active) {
+		while (!_finished
+			&& int(_currents.size()) < kMaxConcurrentDownloads) {
 			if (_index >= int(_ids.size())) {
-				finish();
-				return;
+				break;
 			}
 			const auto id = _ids[_index++];
 			const auto item = _session->data().message(id);
@@ -240,221 +236,233 @@ private:
 					++_skipped;
 					continue;
 				}
-				preparePhoto(id, photo);
+				auto current = std::make_shared<Current>();
+				current->kind = Kind::Photo;
+				current->id = id;
+				current->photo = photo;
+				current->generation = ++_generation;
+				_currents.push_back(current);
+				preparePhoto(current);
 			} else if (const auto document = media->document()) {
 				if (!IsDownloadableDocument(document)) {
 					++_skipped;
 					continue;
 				}
-				prepareDocument(id, document);
+				auto current = std::make_shared<Current>();
+				current->kind = Kind::Document;
+				current->id = id;
+				current->document = document;
+				current->generation = ++_generation;
+				current->path = UniquePath(
+					_folder,
+					DocumentName(document, id),
+					_reserved);
+				_currents.push_back(current);
+				prepareDocument(current);
 			} else {
 				++_skipped;
 			}
 		}
+		if (!_finished && _currents.empty() && _index >= int(_ids.size())) {
+			finish();
+		}
 	}
 
-	void prepareDocument(FullMsgId id, DocumentData *document) {
-		_current = Current();
-		_current.active = true;
-		_current.kind = Kind::Document;
-		_current.id = id;
-		_current.document = document;
-		_current.generation = ++_generation;
-		_current.path = UniquePath(
-			_folder,
-			DocumentName(document, id),
-			_reserved);
-		if (document->loading()) {
-			_current.state = State::WaitingExistingLoad;
+	void prepareDocument(const std::shared_ptr<Current> &current) {
+		const auto document = current->document;
+		if (!document) {
+			failCurrent(current);
 			return;
 		}
-		startDocumentSave();
+		if (document->loading()) {
+			current->state = State::WaitingExistingLoad;
+			return;
+		}
+		startDocumentSave(current);
 	}
 
-	void startDocumentSave() {
-		const auto document = _current.document;
-		if (!document || _current.path.isEmpty()) {
-			failCurrent();
+	void startDocumentSave(const std::shared_ptr<Current> &current) {
+		const auto document = current->document;
+		if (!document || current->path.isEmpty()) {
+			failCurrent(current);
 			return;
 		}
 		const auto localPath = document->filepath(true);
 		if (!localPath.isEmpty()
-			&& localPath != _current.path
+			&& localPath != current->path
 			&& QFileInfo::exists(localPath)
 			&& (document->size <= 0
 				|| QFileInfo(localPath).size() == document->size)
-			&& QFile::copy(localPath, _current.path)) {
-			finishCurrent(true);
+			&& QFile::copy(localPath, current->path)) {
+			finishCurrent(current, true);
 			return;
 		}
-		const auto generation = _current.generation;
-		_inStart = true;
+		current->starting = true;
 		document->save(
-			Data::FileOrigin(_current.id),
-			_current.path,
+			Data::FileOrigin(current->id),
+			current->path,
 			LoadFromCloudOrLocal,
 			false,
 			false);
-		_inStart = false;
-		if (_finished
-			|| !_current.active
-			|| _current.generation != generation) {
+		current->starting = false;
+		if (!current->active || _finished) {
 			return;
 		}
 		if (document->loading()) {
-			_current.state = State::WaitingDownload;
+			current->state = State::WaitingDownload;
 		} else {
-			finishDocument();
+			finishDocument(current);
 		}
 	}
 
-	void checkCurrent() {
-		if (!_current.active) {
+	void checkCurrent(const std::shared_ptr<Current> &current) {
+		if (!current->active) {
 			return;
 		}
-		if (_current.kind == Kind::Document) {
-			checkDocument();
+		if (current->kind == Kind::Document) {
+			checkDocument(current);
 		} else {
-			checkPhoto();
+			checkPhoto(current);
 		}
 	}
 
-	void checkDocument() {
-		const auto document = _current.document;
+	void checkDocument(const std::shared_ptr<Current> &current) {
+		const auto document = current->document;
 		if (!document) {
-			failCurrent();
+			failCurrent(current);
 			return;
 		}
-		if (_current.state == State::WaitingExistingLoad) {
+		if (current->state == State::WaitingExistingLoad) {
 			if (document->loading()) {
 				return;
 			}
-			startDocumentSave();
+			startDocumentSave(current);
 			return;
 		}
 		if (document->loading()) {
 			return;
 		}
 		if (document->cancelled()) {
-			failCurrent();
+			failCurrent(current);
 			return;
 		}
-		finishDocument();
+		finishDocument(current);
 	}
 
-	void finishDocument() {
-		if (TargetMatches(_current.path, _current.document)) {
-			finishCurrent(true);
+	void finishDocument(const std::shared_ptr<Current> &current) {
+		if (TargetMatches(current->path, current->document)) {
+			finishCurrent(current, true);
 		} else {
-			failCurrent();
+			failCurrent(current);
 		}
 	}
 
-	void preparePhoto(FullMsgId id, PhotoData *photo) {
-		_current = Current();
-		_current.active = true;
-		_current.kind = Kind::Photo;
-		_current.id = id;
-		_current.photo = photo;
-		_current.photoMedia = photo->activeMediaView()
+	void preparePhoto(const std::shared_ptr<Current> &current) {
+		const auto photo = current->photo;
+		if (!photo) {
+			failCurrent(current);
+			return;
+		}
+		current->photoMedia = photo->activeMediaView()
 			? photo->activeMediaView()
 			: photo->createMediaView();
-		_current.generation = ++_generation;
-
-		const auto media = _current.photoMedia;
-		const auto generation = _current.generation;
+		const auto media = current->photoMedia;
 		if (media->loaded()) {
-			savePhoto();
+			savePhoto(current);
 			return;
 		}
 		if (photo->failed(Data::PhotoSize::Large)) {
-			if (_current.photoAttempts > 0) {
-				failCurrent();
+			if (current->photoAttempts > 0) {
+				failCurrent(current);
 				return;
 			}
-			_current.photoAttempts++;
+			current->photoAttempts++;
 			photo->clearFailed(Data::PhotoSize::Large);
 		}
-		_inStart = true;
-		media->wanted(Data::PhotoSize::Large, Data::FileOrigin(id));
-		_inStart = false;
-		if (_finished
-			|| !_current.active
-			|| _current.generation != generation) {
+		current->starting = true;
+		media->wanted(Data::PhotoSize::Large, Data::FileOrigin(current->id));
+		current->starting = false;
+		if (!current->active || _finished) {
 			return;
 		}
 		if (media->loaded()) {
-			savePhoto();
+			savePhoto(current);
 			return;
 		}
 		if (photo->loading(Data::PhotoSize::Large)) {
-			_current.state = State::WaitingDownload;
+			current->state = State::WaitingDownload;
 			return;
 		}
-		failCurrent();
+		failCurrent(current);
 	}
 
-	void checkPhoto() {
-		const auto media = _current.photoMedia;
-		const auto photo = _current.photo;
+	void checkPhoto(const std::shared_ptr<Current> &current) {
+		const auto media = current->photoMedia;
+		const auto photo = current->photo;
 		if (!media || !photo) {
-			failCurrent();
+			failCurrent(current);
 			return;
 		}
 		if (media->loaded()) {
-			savePhoto();
+			savePhoto(current);
 			return;
 		}
 		if (photo->failed(Data::PhotoSize::Large) || photo->cancelled()) {
-			failCurrent();
+			failCurrent(current);
 			return;
 		}
 		if (!photo->loading(Data::PhotoSize::Large)) {
-			failCurrent();
+			failCurrent(current);
 		}
 	}
 
-	void savePhoto() {
-		const auto media = _current.photoMedia;
+	void savePhoto(const std::shared_ptr<Current> &current) {
+		const auto media = current->photoMedia;
 		if (!media) {
-			failCurrent();
+			failCurrent(current);
 			return;
 		}
 		const auto extension = media->videoContent(Data::PhotoSize::Large).isEmpty()
 			? u".jpg"_q
 			: u".mp4"_q;
-		_current.path = UniquePath(
+		current->path = UniquePath(
 			_folder,
-			PhotoBaseName(_current.id) + extension,
+			PhotoBaseName(current->id) + extension,
 			_reserved);
-		if (media->saveToFile(_current.path)) {
-			finishCurrent(true);
+		if (media->saveToFile(current->path)) {
+			finishCurrent(current, true);
 		} else {
-			failCurrent();
+			failCurrent(current);
 		}
 	}
 
-	void failCurrent() {
-		if (!_current.path.isEmpty()) {
-			QFile::remove(_current.path);
+	void failCurrent(const std::shared_ptr<Current> &current) {
+		if (!current->path.isEmpty()) {
+			QFile::remove(current->path);
 		}
-		finishCurrent(false);
+		finishCurrent(current, false);
 	}
 
-	void finishCurrent(bool saved) {
-		if (!_current.active) {
+	void finishCurrent(
+			const std::shared_ptr<Current> &current,
+			bool saved) {
+		if (!current->active) {
 			return;
 		}
+		current->active = false;
 		if (saved) {
 			++_saved;
 		} else {
 			++_failed;
 		}
-		_current = Current();
+		const auto i = std::find(_currents.begin(), _currents.end(), current);
+		if (i != _currents.end()) {
+			_currents.erase(i);
+		}
 	}
 
 	void finish() {
-		if (_finished) {
+		if (_finished || !_currents.empty()) {
 			return;
 		}
 		_finished = true;
@@ -462,6 +470,28 @@ private:
 		showResultToast();
 		[[maybe_unused]] const auto keepAlive = shared_from_this();
 		_onFinished();
+	}
+
+	int findDocument(DocumentData *document) const {
+		for (auto i = 0; i != int(_currents.size()); ++i) {
+			if (_currents[i]->active
+				&& _currents[i]->kind == Kind::Document
+				&& _currents[i]->document == document) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	int findPhoto(PhotoData *photo) const {
+		for (auto i = 0; i != int(_currents.size()); ++i) {
+			if (_currents[i]->active
+				&& _currents[i]->kind == Kind::Photo
+				&& _currents[i]->photo == photo) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	void showStartToast() {
@@ -501,13 +531,12 @@ private:
 	const Fn<void()> _onFinished;
 	rpl::lifetime _lifetime;
 	QSet<QString> _reserved;
-	Current _current;
+	std::vector<std::shared_ptr<Current>> _currents;
 	int _index = 0;
 	int _saved = 0;
 	int _failed = 0;
 	int _skipped = 0;
 	uint64 _generation = 0;
-	bool _inStart = false;
 	bool _finished = false;
 };
 
