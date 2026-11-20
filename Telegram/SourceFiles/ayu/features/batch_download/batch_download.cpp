@@ -480,7 +480,7 @@ private:
 			showToast(tr::ayu_BatchDownloadSaved(
 				tr::now,
 				lt_count,
-				QString::number(_saved)));
+				float64(_saved)));
 		}
 	}
 
