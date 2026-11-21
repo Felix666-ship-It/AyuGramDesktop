@@ -205,7 +205,7 @@ jobs:
 
       - name: Build Release
         shell: cmd
-        run: cmake --build out --config Release --target Telegram Updater Packer --parallel 4
+        run: cmake --build out --config Release --target Telegram Updater Packer --parallel 4 -- /p:UseStructuredOutput=false
 
       - name: Remove generated signing header
         if: always()

@@ -93,10 +93,10 @@ namespace {
 	};
 	auto candidate = prefix + base + extension;
 	if (isBusy(candidate)) {
-		candidate = prefix + base + u" - 副本"_q + extension;
+		candidate = prefix + base + u" - \u526f\u672c"_q + extension;
 		for (auto i = 2; isBusy(candidate); ++i) {
 			candidate = prefix + base
-				+ u" - 副本 (%1)"_q.arg(i)
+				+ u" - \u526f\u672c (%1)"_q.arg(i)
 				+ extension;
 		}
 	}
