@@ -8,7 +8,7 @@
   #define MyAppVersion "1.0.0"
 #endif
 #ifndef ReleasePath
-  #define ReleasePath "..\..\out\Release"
+  #define ReleasePath "..\..\out\deploy"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\.."
@@ -41,8 +41,8 @@ WizardStyle=modern
 [Files]
 Source: "{#ReleasePath}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#ReleasePath}\Updater.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#ReleasePath}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#ReleasePath}\modules\*"; DestDir: "{app}\modules"; Flags: recursesubdirs createallsubdirs
+Source: "{#ReleasePath}\*.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#ReleasePath}\modules\*"; DestDir: "{app}\modules"; Flags: recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#MyAppShortName}"; Filename: "{app}\{#MyAppExeName}"

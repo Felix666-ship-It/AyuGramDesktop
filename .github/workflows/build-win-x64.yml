@@ -17,9 +17,14 @@ concurrency:
 
 jobs:
   build:
-    name: Build Windows x64 Release
+    name: Build Windows x64
     runs-on: windows-2022
     timeout-minutes: 360
+
+    outputs:
+      ayu_version: ${{ steps.meta.outputs.ayu_version }}
+      release_version: ${{ steps.meta.outputs.release_version }}
+      package_suffix: ${{ steps.meta.outputs.package_suffix }}
 
     env:
       Platform: x64
@@ -35,6 +40,7 @@ jobs:
           fetch-depth: 1
 
       - name: Resolve build metadata
+        id: meta
         shell: pwsh
         run: |
           $workspace = $env:GITHUB_WORKSPACE
@@ -57,10 +63,12 @@ jobs:
             $numeric = 0
           }
           $suffix = ($refName -replace '[^A-Za-z0-9._-]', '-')
+
           "AYU_VERSION=$version" >> $env:GITHUB_ENV
           "RELEASE_VERSION=$numeric" >> $env:GITHUB_ENV
-          "PACKAGE_NAME=AyuGramMod-Portable-x64-$suffix" >> $env:GITHUB_ENV
-          "SETUP_NAME=AyuGramMod-Setup-x64-$suffix" >> $env:GITHUB_ENV
+          "ayu_version=$version" >> $env:GITHUB_OUTPUT
+          "release_version=$numeric" >> $env:GITHUB_OUTPUT
+          "package_suffix=$suffix" >> $env:GITHUB_OUTPUT
 
       - name: Free disk space
         shell: pwsh
@@ -98,15 +106,6 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-
-      - name: Configure local sccache
-        shell: pwsh
-        run: |
-          "SCCACHE_DIR=$env:DEPS_ROOT\sccache" >> $env:GITHUB_ENV
-          "SCCACHE_CACHE_SIZE=2G" >> $env:GITHUB_ENV
 
       - name: Verify toolchain
         shell: pwsh
@@ -218,40 +217,11 @@ jobs:
       - name: Configure
         shell: cmd
         working-directory: Telegram
-        run: configure.bat -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DDESKTOP_APP_SPECIAL_TARGET=win64 -DTDESKTOP_API_ID=%API_ID% -DTDESKTOP_API_HASH=%API_HASH% -DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF
-
-      - name: Restore sccache cache
-        id: sccache-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.DEPS_ROOT }}/sccache
-          key: win-x64-sccache-${{ github.sha }}
-          restore-keys: |
-            win-x64-sccache-
+        run: configure.bat -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT= -DDESKTOP_APP_SPECIAL_TARGET=win64 -DTDESKTOP_API_ID=%API_ID% -DTDESKTOP_API_HASH=%API_HASH% -DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF
 
       - name: Build Release
         shell: cmd
-        run: cmake --build out --target Telegram Updater Packer -j 3
-
-      - name: Stop sccache server
-        if: always()
-        shell: pwsh
-        run: |
-          sccache --stop-server
-          exit 0
-
-      - name: Save sccache cache
-        if: always()
-        continue-on-error: true
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ env.DEPS_ROOT }}/sccache
-          key: win-x64-sccache-${{ github.sha }}
-
-      - name: Show sccache stats
-        if: always()
-        shell: pwsh
-        run: sccache --show-stats
+        run: cmake --build out --target Telegram Updater Packer -j 4
 
       - name: Remove generated signing header
         if: always()
@@ -277,21 +247,135 @@ jobs:
             Get-Item $path | Format-List FullName,Length,LastWriteTime
           }
 
-      - name: Build portable package
+      - name: Stage deploy directory
         shell: pwsh
         run: |
           $source = $env:BUILD_OUTPUT
+          $deploy = 'out/deploy'
+          if (Test-Path $deploy) {
+            Remove-Item $deploy -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $deploy | Out-Null
+          New-Item -ItemType Directory -Path 'out/update-package' -Force | Out-Null
+          Copy-Item (Join-Path $source 'AyuGram.exe') $deploy
+          Copy-Item (Join-Path $source 'Updater.exe') $deploy
+
+          $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
+          if ($dlls) {
+            $dlls | Copy-Item -Destination $deploy
+          }
+          $modules = Join-Path $source 'modules'
+          if (Test-Path $modules) {
+            Copy-Item $modules $deploy -Recurse
+          }
+
+      - name: Build signed native update
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          if ([int]$env:RELEASE_VERSION -le 0) {
+            throw 'Tag must contain a valid numeric version.'
+          }
+          $source = $env:BUILD_OUTPUT
+          $updateDir = 'out/update-package'
+          if (Test-Path $updateDir) {
+            Remove-Item $updateDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $updateDir | Out-Null
+
+          $deployPath = (Resolve-Path 'out/deploy').Path
+          Push-Location $source
+          try {
+            & (Join-Path (Get-Location) 'Packer.exe') `
+              -path $deployPath `
+              -target win64 `
+              -version $env:RELEASE_VERSION
+            if ($LASTEXITCODE -ne 0) {
+              throw 'Packer signing failed.'
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $updateFile = Join-Path $source "tx64upd$env:RELEASE_VERSION"
+          if (!(Test-Path $updateFile)) {
+            throw "Packer output not found: $updateFile"
+          }
+          Move-Item $updateFile (Join-Path $updateDir "tx64upd$env:RELEASE_VERSION") -Force
+
+      - name: Remove Packer and private key material
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:BUILD_OUTPUT) {
+            Remove-Item (Join-Path $env:BUILD_OUTPUT 'Packer.exe') -Force -ErrorAction SilentlyContinue
+            Remove-Item (Join-Path $env:BUILD_OUTPUT 'Packer.pdb') -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item 'Telegram/SourceFiles/_other/packer_private.h' -Force -ErrorAction SilentlyContinue
+
+      - name: Upload staged build
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-x64-staged
+          if-no-files-found: error
+          retention-days: 2
+          path: |
+            out/deploy
+            out/update-package
+
+  package:
+    name: Package Windows x64
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    env:
+      AYU_VERSION: ${{ needs.build.outputs.ayu_version }}
+      RELEASE_VERSION: ${{ needs.build.outputs.release_version }}
+      PACKAGE_SUFFIX: ${{ needs.build.outputs.package_suffix }}
+
+    steps:
+      - name: Checkout packaging files
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 1
+
+      - name: Download staged build
+        uses: actions/download-artifact@v4
+        with:
+          name: win-x64-staged
+          path: staged
+
+      - name: Resolve staged paths
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'staged' -Recurse -Filter 'AyuGram.exe' -File |
+            Select-Object -First 1
+          if (!$exe) {
+            throw 'AyuGram.exe not found in win-x64-staged.'
+          }
+          "DEPLOY_DIR=$($exe.Directory.FullName)" >> $env:GITHUB_ENV
+
+          $update = Get-ChildItem 'staged' -Recurse -File -Filter 'tx64upd*' |
+            Select-Object -First 1
+          if ($update) {
+            "UPDATE_FILE=$($update.FullName)" >> $env:GITHUB_ENV
+          }
+
+          "PACKAGE_NAME=AyuGramMod-Portable-x64-$env:PACKAGE_SUFFIX" >> $env:GITHUB_ENV
+          "SETUP_NAME=AyuGramMod-Setup-x64-$env:PACKAGE_SUFFIX" >> $env:GITHUB_ENV
+
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          $deploy = $env:DEPLOY_DIR
           $stage = 'out/portable'
           if (Test-Path $stage) {
             Remove-Item $stage -Recurse -Force
           }
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item (Join-Path $source 'AyuGram.exe') $stage
-          Copy-Item (Join-Path $source 'Updater.exe') $stage
-          Copy-Item (Join-Path $source '*.dll') $stage
-          if (Test-Path (Join-Path $source 'modules')) {
-            Copy-Item (Join-Path $source 'modules') $stage -Recurse
-          }
+          Copy-Item (Join-Path $deploy '*') $stage -Recurse
           Compress-Archive -Path "$stage/*" -DestinationPath "$env:PACKAGE_NAME.zip" -Force
           Get-Item "$env:PACKAGE_NAME.zip" | Format-List FullName,Length
 
@@ -305,10 +389,10 @@ jobs:
           if (!(Test-Path $iscc)) {
             throw 'Inno Setup ISCC.exe was not found on the runner.'
           }
-          $releasePath = (Resolve-Path $env:BUILD_OUTPUT).Path
+          $deploy = (Resolve-Path $env:DEPLOY_DIR).Path
           $root = (Get-Location).Path
           & $iscc "/DMyAppVersion=$env:AYU_VERSION" `
-            "/DReleasePath=$releasePath" `
+            "/DReleasePath=$deploy" `
             "/DOutputDir=$root" `
             "/DOutputBaseFilename=$env:SETUP_NAME" `
             'Telegram\build\setup_ayu_mod.iss'
@@ -317,48 +401,25 @@ jobs:
           }
           Get-Item "$env:SETUP_NAME.exe" | Format-List FullName,Length
 
-      - name: Build signed native update
+      - name: Generate current manifest
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
-          if ([int]$env:RELEASE_VERSION -le 0) {
-            throw 'Tag must contain a valid numeric version.'
+          if ([string]::IsNullOrWhiteSpace($env:UPDATE_FILE) -or
+              !(Test-Path $env:UPDATE_FILE)) {
+            throw 'Signed update package was not found.'
           }
-          $source = $env:BUILD_OUTPUT
-          $stage = 'out/update'
-          if (Test-Path $stage) {
-            Remove-Item $stage -Recurse -Force
+          $link = Split-Path -Leaf $env:UPDATE_FILE
+          if ($link -notmatch '^tx64upd\d+$') {
+            throw "Unexpected update package name: $link"
           }
-          New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item (Join-Path $source 'AyuGram.exe') $stage
-          Copy-Item (Join-Path $source 'Updater.exe') $stage
-          Copy-Item (Join-Path $source '*.dll') $stage
-          if (Test-Path (Join-Path $source 'modules')) {
-            Copy-Item (Join-Path $source 'modules') $stage -Recurse
-          }
-
-          $updatePath = (Resolve-Path $stage).Path
-          Push-Location $source
-          try {
-            & (Join-Path (Get-Location) 'Packer.exe') -path $updatePath -target win64 -version $env:RELEASE_VERSION
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Packer signing failed.'
-            }
-          } finally {
-            Pop-Location
-          }
-
-          $updateFile = Join-Path $source "tx64upd$env:RELEASE_VERSION"
-          if (!(Test-Path $updateFile)) {
-            throw "Packer output not found: $updateFile"
-          }
-          Move-Item $updateFile "tx64upd$env:RELEASE_VERSION" -Force
+          Copy-Item $env:UPDATE_FILE (Join-Path (Get-Location).Path $link) -Force
 
           $current = [ordered]@{
             win64 = [ordered]@{
               stable = [ordered]@{
                 released = [int]$env:RELEASE_VERSION
-                link = "tx64upd$env:RELEASE_VERSION"
+                link = $link
               }
             }
           } | ConvertTo-Json -Depth 5
@@ -368,16 +429,13 @@ jobs:
             [Text.UTF8Encoding]::new($false))
           Get-Content 'current'
 
-      - name: Upload unsigned build
+      - name: Upload final package
         uses: actions/upload-artifact@v4
         with:
-          name: AyuGram-Windows-x64
+          name: AyuGramMod-Windows-x64
           if-no-files-found: error
           retention-days: 7
           path: |
-            ${{ env.BUILD_OUTPUT }}/*.exe
-            ${{ env.BUILD_OUTPUT }}/*.dll
-            ${{ env.BUILD_OUTPUT }}/modules/**
             AyuGramMod-Portable-x64-*.zip
             AyuGramMod-Setup-x64-*.exe
             tx64upd*
