@@ -26,7 +26,6 @@ jobs:
       API_ID: ${{ secrets.API_ID }}
       API_HASH: ${{ secrets.API_HASH }}
       UPDATES_PRIVATE_KEY: ${{ secrets.UPDATES_PRIVATE_KEY }}
-      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -103,16 +102,11 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.6
 
-      - name: Configure sccache GHA backend
+      - name: Configure local sccache
         shell: pwsh
         run: |
-          "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
-          if ($env:ACTIONS_CACHE_URL) {
-            "ACTIONS_CACHE_URL=$env:ACTIONS_CACHE_URL" >> $env:GITHUB_ENV
-          }
-          if ($env:ACTIONS_RUNTIME_TOKEN) {
-            "ACTIONS_RUNTIME_TOKEN=$env:ACTIONS_RUNTIME_TOKEN" >> $env:GITHUB_ENV
-          }
+          "SCCACHE_DIR=$env:DEPS_ROOT\sccache" >> $env:GITHUB_ENV
+          "SCCACHE_CACHE_SIZE=2G" >> $env:GITHUB_ENV
 
       - name: Verify toolchain
         shell: pwsh
@@ -225,11 +219,33 @@ jobs:
         working-directory: Telegram
         run: configure.bat -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DDESKTOP_APP_SPECIAL_TARGET=win64 -DTDESKTOP_API_ID=%API_ID% -DTDESKTOP_API_HASH=%API_HASH% -DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF
 
+      - name: Restore sccache cache
+        id: sccache-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DEPS_ROOT }}/sccache
+          key: win-x64-sccache-${{ github.sha }}
+          restore-keys: |
+            win-x64-sccache-
+
       - name: Build Release
         shell: cmd
-        env:
-          SCCACHE_GHA_ENABLED: "true"
         run: cmake --build out --target Telegram Updater Packer -j 3
+
+      - name: Stop sccache server
+        if: always()
+        shell: pwsh
+        run: |
+          sccache --stop-server
+          exit 0
+
+      - name: Save sccache cache
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.DEPS_ROOT }}/sccache
+          key: win-x64-sccache-${{ github.sha }}
 
       - name: Show sccache stats
         if: always()
