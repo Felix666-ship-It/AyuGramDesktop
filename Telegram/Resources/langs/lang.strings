@@ -9130,6 +9130,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "ayu_MessageShotRevealSpoilers" = "Reveal spoilers";
 "ayu_BatchDownloadTopBarText" = "批量下载";
 "ayu_BatchDownload" = "批量下载";
+"ayu_BatchDownloadSubfolderOption" = "批量下载时为非同一组的消息自动创建子文件夹";
 "ayu_BatchDownloadStarted" = "已开始批量下载";
 "ayu_BatchDownloadSaved#one" = "已保存 {count} 个文件到所选文件夹";
 "ayu_BatchDownloadSaved#other" = "已保存 {count} 个文件到所选文件夹";

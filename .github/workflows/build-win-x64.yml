@@ -231,15 +231,15 @@ jobs:
       - name: Verify binaries
         shell: pwsh
         run: |
-          $output = if (Test-Path 'out/Release/AyuGram.exe') {
+          $output = if (Test-Path 'out/Release/AyuGramMod.exe') {
             'out/Release'
-          } elseif (Test-Path 'out/AyuGram.exe') {
+          } elseif (Test-Path 'out/AyuGramMod.exe') {
             'out'
           } else {
-            throw 'AyuGram.exe was not produced'
+            throw 'AyuGramMod.exe was not produced'
           }
           "BUILD_OUTPUT=$output" >> $env:GITHUB_ENV
-          foreach ($name in 'AyuGram.exe', 'Updater.exe', 'Packer.exe') {
+          foreach ($name in 'AyuGramMod.exe', 'Updater.exe', 'Packer.exe') {
             $path = Join-Path $output $name
             if (!(Test-Path $path)) {
               throw "$name was not produced"
@@ -257,7 +257,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path $deploy | Out-Null
           New-Item -ItemType Directory -Path 'out/update-package' -Force | Out-Null
-          Copy-Item (Join-Path $source 'AyuGram.exe') $deploy
+          Copy-Item (Join-Path $source 'AyuGramMod.exe') $deploy
           Copy-Item (Join-Path $source 'Updater.exe') $deploy
 
           $dlls = Get-ChildItem -LiteralPath $source -Filter '*.dll' -File
@@ -350,10 +350,10 @@ jobs:
       - name: Resolve staged paths
         shell: pwsh
         run: |
-          $exe = Get-ChildItem 'staged' -Recurse -Filter 'AyuGram.exe' -File |
+          $exe = Get-ChildItem 'staged' -Recurse -Filter 'AyuGramMod.exe' -File |
             Select-Object -First 1
           if (!$exe) {
-            throw 'AyuGram.exe not found in win-x64-staged.'
+            throw 'AyuGramMod.exe not found in win-x64-staged.'
           }
           "DEPLOY_DIR=$($exe.Directory.FullName)" >> $env:GITHUB_ENV
 
@@ -389,12 +389,23 @@ jobs:
           if (!(Test-Path $iscc)) {
             throw 'Inno Setup ISCC.exe was not found on the runner.'
           }
+          $chinese = Join-Path (Split-Path $iscc) 'Languages\ChineseSimplified.isl'
+          if (!(Test-Path $chinese)) {
+            Invoke-WebRequest `
+              -Uri 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl' `
+              -OutFile $chinese `
+              -UseBasicParsing
+          }
+          if (!(Test-Path $chinese)) {
+            throw 'ChineseSimplified.isl could not be prepared.'
+          }
           $deploy = (Resolve-Path $env:DEPLOY_DIR).Path
           $root = (Get-Location).Path
           & $iscc "/DMyAppVersion=$env:AYU_VERSION" `
             "/DReleasePath=$deploy" `
             "/DOutputDir=$root" `
             "/DOutputBaseFilename=$env:SETUP_NAME" `
+            "/DChineseSimplifiedLanguage=$chinese" `
             'Telegram\build\setup_ayu_mod.iss'
           if ($LASTEXITCODE -ne 0) {
             throw 'Inno Setup compilation failed.'

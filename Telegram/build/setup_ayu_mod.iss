@@ -1,6 +1,6 @@
 #define MyAppName "AyuGramMod"
 #define MyAppShortName "AyuGramMod"
-#define MyAppExeName "AyuGram.exe"
+#define MyAppExeName "AyuGramMod.exe"
 #define MyAppPublisher "AyuGramMod"
 #define MyAppId "8D9A56B2-6C1E-4FD8-9B77-1B0B9E3D3A21"
 
@@ -16,17 +16,24 @@
 #ifndef OutputBaseFilename
   #define OutputBaseFilename "AyuGramMod-Setup-x64"
 #endif
+#ifndef ChineseSimplifiedLanguage
+  #define ChineseSimplifiedLanguage "compiler:Languages\ChineseSimplified.isl"
+#endif
+
+[Languages]
+Name: "chs"; MessagesFile: "{#ChineseSimplifiedLanguage}"
 
 [Setup]
 AppId={{{#MyAppId}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={userappdata}\{#MyAppName}
+DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 DisableDirPage=no
 AllowNoIcons=yes
+LanguageDetectionMethod=uilanguage
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputBaseFilename}
 Compression=lzma2

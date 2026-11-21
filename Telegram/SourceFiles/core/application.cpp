@@ -315,6 +315,9 @@ void Application::run() {
 	_notifications = std::make_unique<Window::Notifications::System>();
 
 	startLocalStorage();
+	if (Lang::Id().isEmpty()) {
+		Lang::GetInstance().switchToId(Lang::DefaultLanguage());
+	}
 
 	style::SetCustomFont(settings().customFontFamily());
 	style::internal::StartFonts();
@@ -441,6 +444,7 @@ void Application::run() {
 	DEBUG_LOG(("Application Info: window created..."));
 
 	startDomain();
+	AyuInfra::applyDefaultThemeIfNeeded();
 	startTray();
 
 	_lastActivePrimaryWindow->firstShow();
@@ -2054,7 +2058,7 @@ void Application::RegisterUrlScheme() {
 		.arguments = arguments,
 		.protocol = u"tg"_q,
 		.protocolName = u"Telegram Link"_q,
-		.shortAppName = u"AyuGram"_q,
+		.shortAppName = u"AyuGramMod"_q,
 		.longAppName = QCoreApplication::applicationName(),
 		.displayAppName = AppName.utf16(),
 		.displayAppDescription = AppName.utf16(),

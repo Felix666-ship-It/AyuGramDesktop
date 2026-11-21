@@ -206,6 +206,13 @@ void BuildQoLToggles(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 		.setter = &AyuSettings::setDisableNotificationsDelay,
 	});
 
+	ayu.addSettingToggle({
+		.id = u"ayu/batchDownloadSubfolders"_q,
+		.title = tr::ayu_BatchDownloadSubfolderOption(),
+		.getter = &AyuSettings::batchDownloadSubfoldersForSeparateGroups,
+		.setter = &AyuSettings::setBatchDownloadSubfoldersForSeparateGroups,
+	});
+
 	ayu.addSectionDivider();
 
 	const auto zalgoButton = builder.addButton({

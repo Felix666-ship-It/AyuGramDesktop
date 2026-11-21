@@ -6,6 +6,7 @@
 // Copyright @Radolyn, 2026
 #include "ayu/features/batch_download/batch_download.h"
 
+#include "ayu/ayu_settings.h"
 #include "base/base_file_utilities.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
@@ -25,6 +26,8 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QHash>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
 
 #include <algorithm>
@@ -116,6 +119,60 @@ namespace {
 		|| info.size() == document->size;
 }
 
+[[nodiscard]] QString FirstLine(const QString &text) {
+	const auto index = text.indexOf('\n');
+	return (index < 0 ? text : text.left(index)).trimmed();
+}
+
+[[nodiscard]] QString CleanFolderName(QString value) {
+	value.replace(QRegularExpression(u"[\\\\/:*?\"<>|]"_q), QString());
+	for (auto i = 0; i != value.size(); ++i) {
+		if (value[i].unicode() < 0x20) {
+			value[i] = QChar(' ');
+		}
+	}
+	value = value.trimmed();
+	while (value.endsWith('.') || value.endsWith(' ')) {
+		value.chop(1);
+	}
+	if (value.size() > 40) {
+		value.truncate(40);
+	}
+	while (value.endsWith('.') || value.endsWith(' ')) {
+		value.chop(1);
+	}
+	return value;
+}
+
+[[nodiscard]] QString GroupKey(HistoryItem *item) {
+	const auto fullId = item->fullId();
+	const auto groupId = item->groupId();
+	if (!groupId.empty()) {
+		return u"g:%1:%2"_q.arg(
+			fullId.peer.value).arg(groupId.raw());
+	}
+	return u"m:%1:%2"_q.arg(
+		fullId.peer.value).arg(fullId.msg.bare);
+}
+
+[[nodiscard]] QString UniqueFolderName(
+		QString base,
+		QSet<QString> &reserved) {
+	base = CleanFolderName(std::move(base));
+	if (base.isEmpty()) {
+		base = u"\u6d88\u606f"_q;
+	}
+	auto candidate = base;
+	if (reserved.contains(candidate.toCaseFolded())) {
+		candidate = base + u" - \u526f\u672c"_q;
+		for (auto i = 2; reserved.contains(candidate.toCaseFolded()); ++i) {
+			candidate = base + u" - \u526f\u672c (%1)"_q.arg(i);
+		}
+	}
+	reserved.insert(candidate.toCaseFolded());
+	return candidate;
+}
+
 class Task final : public std::enable_shared_from_this<Task> {
 public:
 	Task(
@@ -123,11 +180,13 @@ public:
 		MessageIdsList ids,
 		QString folder,
 		base::weak_ptr<Window::SessionController> controller,
+		bool subfolders,
 		Fn<void()> onFinished)
 	: _session(session)
 	, _controller(std::move(controller))
 	, _folder(QDir(folder).absolutePath())
 	, _ids(std::move(ids))
+	, _subfolders(subfolders)
 	, _onFinished(std::move(onFinished)) {
 	}
 
@@ -156,6 +215,7 @@ public:
 			finish();
 			return;
 		}
+		prepareGroups();
 
 		_session->data().documentLoadProgress(
 		) | rpl::on_next([this](not_null<DocumentData*> document) {
@@ -210,6 +270,7 @@ private:
 		Kind kind = Kind::Document;
 		State state = State::None;
 		FullMsgId id;
+		QString folder;
 		QString path;
 		DocumentData *document = nullptr;
 		PhotoData *photo = nullptr;
@@ -217,6 +278,43 @@ private:
 		int photoAttempts = 0;
 		uint64 generation = 0;
 	};
+
+	void prepareGroups() {
+		if (!_subfolders) {
+			return;
+		}
+		for (const auto &id : _ids) {
+			const auto item = _session->data().message(id);
+			if (!item || !IsDownloadableMedia(item->media())) {
+				continue;
+			}
+			const auto key = GroupKey(item);
+			if (!_groupCaptions.contains(key)) {
+				_groupOrder.push_back(key);
+				_groupFallback.insert(key, id);
+				_groupCaptions.insert(key, QString());
+			}
+			if (_groupCaptions.value(key).isEmpty()) {
+				_groupCaptions[key] = FirstLine(item->originalText().text);
+			}
+		}
+		_groupCount = int(_groupOrder.size());
+		if (_groupCount <= 1) {
+			return;
+		}
+		auto reservedFolders = QSet<QString>();
+		for (const auto &key : _groupOrder) {
+			auto base = _groupCaptions.value(key);
+			if (base.isEmpty()) {
+				base = u"\u6d88\u606f_"_q
+					+ QString::number(_groupFallback.value(key).msg.bare);
+			}
+			const auto name = UniqueFolderName(base, reservedFolders);
+			const auto path = FolderWithSlash(_folder) + name;
+			QDir().mkpath(path);
+			_groupFolders.insert(key, path);
+		}
+	}
 
 	void advance() {
 		if (_advancing || _finished) {
@@ -238,6 +336,10 @@ private:
 				++_skipped;
 				continue;
 			}
+			auto folder = _folder;
+			if (_subfolders && _groupCount > 1) {
+				folder = _groupFolders.value(GroupKey(item), _folder);
+			}
 			if (const auto photo = media->photo()) {
 				if (photo->isNull()) {
 					++_skipped;
@@ -246,6 +348,7 @@ private:
 				auto current = std::make_shared<Current>();
 				current->kind = Kind::Photo;
 				current->id = id;
+				current->folder = folder;
 				current->photo = photo;
 				current->generation = ++_generation;
 				_currents.push_back(current);
@@ -258,10 +361,11 @@ private:
 				auto current = std::make_shared<Current>();
 				current->kind = Kind::Document;
 				current->id = id;
+				current->folder = folder;
 				current->document = document;
 				current->generation = ++_generation;
 				current->path = UniquePath(
-					_folder,
+					current->folder,
 					DocumentName(document, id),
 					_reservedPaths);
 				_currents.push_back(current);
@@ -434,7 +538,7 @@ private:
 			? u".jpg"_q
 			: u".mp4"_q;
 		current->path = UniquePath(
-			_folder,
+			current->folder,
 			PhotoBaseName(current->id) + extension,
 			_reservedPaths);
 		if (media->saveToFile(current->path)) {
@@ -536,9 +640,15 @@ private:
 	const base::weak_ptr<Window::SessionController> _controller;
 	const QString _folder;
 	const MessageIdsList _ids;
+	const bool _subfolders;
 	const Fn<void()> _onFinished;
 	rpl::lifetime _lifetime;
 	QSet<QString> _reservedPaths;
+	std::vector<QString> _groupOrder;
+	QHash<QString, QString> _groupCaptions;
+	QHash<QString, FullMsgId> _groupFallback;
+	QHash<QString, QString> _groupFolders;
+	int _groupCount = 0;
 	std::vector<std::shared_ptr<Current>> _currents;
 	int _index = 0;
 	int _saved = 0;
@@ -581,12 +691,14 @@ public:
 		MessageIdsList ids,
 		QString folder,
 		base::weak_ptr<Window::SessionController> controller,
+		bool subfolders,
 		Fn<void()> onStarted) {
 		auto task = std::make_shared<Task>(
 			_session,
 			std::move(ids),
 			std::move(folder),
 			std::move(controller),
+			subfolders,
 			[this] { taskFinished(); });
 		_queue.push_back(std::move(task));
 		if (onStarted) {
@@ -647,6 +759,8 @@ void Manager::chooseFolderAndStart(
 				std::move(ids),
 				std::move(folder),
 				weakController,
+				AyuSettings::getInstance()
+					.batchDownloadSubfoldersForSeparateGroups(),
 				std::move(onStarted));
 		});
 }

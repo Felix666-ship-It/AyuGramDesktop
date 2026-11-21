@@ -16,6 +16,11 @@
 #include "lang/lang_instance.h"
 #include "ui/chat/chat_style_radius.h"
 #include "utils/rc_manager.h"
+#include "window/themes/window_theme.h"
+
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QTemporaryFile>
 
 #ifdef Q_OS_WIN
 #include "ayu/utils/windows_utils.h"
@@ -75,6 +80,44 @@ void init() {
 	initWorker();
 	initRCManager();
 	initTranslator();
+}
+
+void applyDefaultThemeIfNeeded() {
+	auto &settings = AyuSettings::getInstance();
+	if (settings.defaultWeChatThemeApplied()) {
+		return;
+	}
+	const auto &theme = Window::Theme::Background()->themeObject();
+	if (!theme.pathAbsolute.isEmpty() || theme.cloud.id) {
+		settings.setDefaultWeChatThemeApplied(true);
+		return;
+	}
+
+	auto file = QFile(u":/gui/themes/wechat_v81.tdesktop-theme"_q);
+	if (!file.open(QIODevice::ReadOnly)) {
+		LOG(("Default theme: embedded resource not found."));
+		return;
+	}
+	const auto content = file.readAll();
+	file.close();
+
+	auto temporary = QTemporaryFile(
+		QDir::tempPath() + u"/ayu_wechat_XXXXXX.tdesktop-theme"_q);
+	if (!temporary.open()
+		|| temporary.write(content) != content.size()) {
+		LOG(("Default theme: could not write temporary theme."));
+		return;
+	}
+	temporary.flush();
+	temporary.close();
+
+	if (Window::Theme::Apply(temporary.fileName())) {
+		Window::Theme::KeepApplied();
+		settings.setDefaultWeChatThemeApplied(true);
+		LOG(("Default theme: WeChat 8.1 applied."));
+	} else {
+		LOG(("Default theme: failed to parse embedded theme."));
+	}
 }
 
 }

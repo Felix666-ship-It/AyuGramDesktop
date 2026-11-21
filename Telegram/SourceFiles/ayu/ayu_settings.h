@@ -290,6 +290,8 @@ public:
 	[[nodiscard]] bool materialSwitches() const { return _materialSwitches.current(); }
 	[[nodiscard]] bool removeMessageTail() const { return _removeMessageTail.current(); }
 	[[nodiscard]] bool disableNotificationsDelay() const { return _disableNotificationsDelay.current(); }
+	[[nodiscard]] bool batchDownloadSubfoldersForSeparateGroups() const { return _batchDownloadSubfoldersForSeparateGroups.current(); }
+	[[nodiscard]] bool defaultWeChatThemeApplied() const { return _defaultWeChatThemeApplied.current(); }
 	[[nodiscard]] bool localPremium() const { return _localPremium.current(); }
 	[[nodiscard]] bool showChannelReactions() const { return _showChannelReactions.current(); }
 	[[nodiscard]] bool showGroupReactions() const { return _showGroupReactions.current(); }
@@ -377,6 +379,8 @@ public:
 	void setMaterialSwitches(bool val);
 	void setRemoveMessageTail(bool val);
 	void setDisableNotificationsDelay(bool val);
+	void setBatchDownloadSubfoldersForSeparateGroups(bool val);
+	void setDefaultWeChatThemeApplied(bool val);
 	void setLocalPremium(bool val);
 	void setShowChannelReactions(bool val);
 	void setShowGroupReactions(bool val);
@@ -647,6 +651,8 @@ private:
 	rpl::variable<bool> _materialSwitches = true;
 	rpl::variable<bool> _removeMessageTail = false;
 	rpl::variable<bool> _disableNotificationsDelay = false;
+	rpl::variable<bool> _batchDownloadSubfoldersForSeparateGroups = false;
+	rpl::variable<bool> _defaultWeChatThemeApplied = false;
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _showChannelReactions = true;
 	rpl::variable<bool> _showGroupReactions = true;
