@@ -26,6 +26,7 @@ jobs:
       API_ID: ${{ secrets.API_ID }}
       API_HASH: ${{ secrets.API_HASH }}
       UPDATES_PRIVATE_KEY: ${{ secrets.UPDATES_PRIVATE_KEY }}
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: Checkout
@@ -82,6 +83,13 @@ jobs:
           }
           Get-PSDrive C | Select-Object Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,2)}}
 
+      - name: Expand Windows pagefile
+        uses: al-cheb/configure-pagefile-action@v1.3
+        with:
+          minimum-size: 16GB
+          maximum-size: 24GB
+          disk-root: "C:"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -91,6 +99,20 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Configure sccache GHA backend
+        shell: pwsh
+        run: |
+          "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
+          if ($env:ACTIONS_CACHE_URL) {
+            "ACTIONS_CACHE_URL=$env:ACTIONS_CACHE_URL" >> $env:GITHUB_ENV
+          }
+          if ($env:ACTIONS_RUNTIME_TOKEN) {
+            "ACTIONS_RUNTIME_TOKEN=$env:ACTIONS_RUNTIME_TOKEN" >> $env:GITHUB_ENV
+          }
 
       - name: Verify toolchain
         shell: pwsh
@@ -201,11 +223,18 @@ jobs:
       - name: Configure
         shell: cmd
         working-directory: Telegram
-        run: configure.bat x64 -D TDESKTOP_API_ID=%API_ID% -D TDESKTOP_API_HASH=%API_HASH% -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF
+        run: configure.bat -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -DTDESKTOP_API_ID=%API_ID% -DTDESKTOP_API_HASH=%API_HASH% -DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF
 
       - name: Build Release
         shell: cmd
-        run: cmake --build out --config Release --target Telegram Updater Packer --parallel 4 -- /p:UseStructuredOutput=false
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: cmake --build out --target Telegram Updater Packer -j 3
+
+      - name: Show sccache stats
+        if: always()
+        shell: pwsh
+        run: sccache --show-stats
 
       - name: Remove generated signing header
         if: always()
@@ -215,8 +244,16 @@ jobs:
       - name: Verify binaries
         shell: pwsh
         run: |
+          $output = if (Test-Path 'out/Release/AyuGram.exe') {
+            'out/Release'
+          } elseif (Test-Path 'out/AyuGram.exe') {
+            'out'
+          } else {
+            throw 'AyuGram.exe was not produced'
+          }
+          "BUILD_OUTPUT=$output" >> $env:GITHUB_ENV
           foreach ($name in 'AyuGram.exe', 'Updater.exe', 'Packer.exe') {
-            $path = Join-Path 'out/Release' $name
+            $path = Join-Path $output $name
             if (!(Test-Path $path)) {
               throw "$name was not produced"
             }
@@ -226,16 +263,17 @@ jobs:
       - name: Build portable package
         shell: pwsh
         run: |
+          $source = $env:BUILD_OUTPUT
           $stage = 'out/portable'
           if (Test-Path $stage) {
             Remove-Item $stage -Recurse -Force
           }
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item 'out/Release/AyuGram.exe' $stage
-          Copy-Item 'out/Release/Updater.exe' $stage
-          Copy-Item 'out/Release/*.dll' $stage
-          if (Test-Path 'out/Release/modules') {
-            Copy-Item 'out/Release/modules' $stage -Recurse
+          Copy-Item (Join-Path $source 'AyuGram.exe') $stage
+          Copy-Item (Join-Path $source 'Updater.exe') $stage
+          Copy-Item (Join-Path $source '*.dll') $stage
+          if (Test-Path (Join-Path $source 'modules')) {
+            Copy-Item (Join-Path $source 'modules') $stage -Recurse
           }
           Compress-Archive -Path "$stage/*" -DestinationPath "$env:PACKAGE_NAME.zip" -Force
           Get-Item "$env:PACKAGE_NAME.zip" | Format-List FullName,Length
@@ -250,7 +288,7 @@ jobs:
           if (!(Test-Path $iscc)) {
             throw 'Inno Setup ISCC.exe was not found on the runner.'
           }
-          $releasePath = (Resolve-Path 'out/Release').Path
+          $releasePath = (Resolve-Path $env:BUILD_OUTPUT).Path
           $root = (Get-Location).Path
           & $iscc "/DMyAppVersion=$env:AYU_VERSION" `
             "/DReleasePath=$releasePath" `
@@ -269,22 +307,23 @@ jobs:
           if ([int]$env:RELEASE_VERSION -le 0) {
             throw 'Tag must contain a valid numeric version.'
           }
+          $source = $env:BUILD_OUTPUT
           $stage = 'out/update'
           if (Test-Path $stage) {
             Remove-Item $stage -Recurse -Force
           }
           New-Item -ItemType Directory -Path $stage | Out-Null
-          Copy-Item 'out/Release/AyuGram.exe' $stage
-          Copy-Item 'out/Release/Updater.exe' $stage
-          Copy-Item 'out/Release/*.dll' $stage
-          if (Test-Path 'out/Release/modules') {
-            Copy-Item 'out/Release/modules' $stage -Recurse
+          Copy-Item (Join-Path $source 'AyuGram.exe') $stage
+          Copy-Item (Join-Path $source 'Updater.exe') $stage
+          Copy-Item (Join-Path $source '*.dll') $stage
+          if (Test-Path (Join-Path $source 'modules')) {
+            Copy-Item (Join-Path $source 'modules') $stage -Recurse
           }
 
-          Push-Location 'out/Release'
+          $updatePath = (Resolve-Path $stage).Path
+          Push-Location $source
           try {
-            $updatePath = (Resolve-Path '..\update').Path
-            & '.\Packer.exe' -path $updatePath -target win64 -version $env:RELEASE_VERSION
+            & (Join-Path (Get-Location) 'Packer.exe') -path $updatePath -target win64 -version $env:RELEASE_VERSION
             if ($LASTEXITCODE -ne 0) {
               throw 'Packer signing failed.'
             }
@@ -292,7 +331,7 @@ jobs:
             Pop-Location
           }
 
-          $updateFile = "out/Release/tx64upd$env:RELEASE_VERSION"
+          $updateFile = Join-Path $source "tx64upd$env:RELEASE_VERSION"
           if (!(Test-Path $updateFile)) {
             throw "Packer output not found: $updateFile"
           }
@@ -319,9 +358,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: |
-            out/Release/*.exe
-            out/Release/*.dll
-            out/Release/modules/**
+            ${{ env.BUILD_OUTPUT }}/*.exe
+            ${{ env.BUILD_OUTPUT }}/*.dll
+            ${{ env.BUILD_OUTPUT }}/modules/**
             AyuGramMod-Portable-x64-*.zip
             AyuGramMod-Setup-x64-*.exe
             tx64upd*
