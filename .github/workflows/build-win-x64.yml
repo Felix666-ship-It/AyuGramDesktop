@@ -203,7 +203,8 @@ jobs:
           $escaped = $pem.Replace('\', '\\').Replace('"', '\"')
           $escaped = $escaped.Replace("`r`n", '\n').Replace("`n", '\n')
           $header = 'const char *PrivateKey = "' + $escaped + '";' + "`n" +
-            'const char *PrivateBetaKey = "' + $escaped + '";' + "`n"
+            'const char *PrivateBetaKey = "' + $escaped + '";' + "`n" +
+            'const char *AlphaPrivateKey = "' + $escaped + '";' + "`n"
           Set-Content -LiteralPath 'Telegram/SourceFiles/_other/packer_private.h' -Value $header -NoNewline
 
       - name: Validate API secrets
