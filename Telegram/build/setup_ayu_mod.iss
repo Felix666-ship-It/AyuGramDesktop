@@ -17,7 +17,7 @@
   #define OutputBaseFilename "AyuGramMod-Setup-x64"
 #endif
 #ifndef ChineseSimplifiedLanguage
-  #define ChineseSimplifiedLanguage "compiler:Languages\ChineseSimplified.isl"
+  #define ChineseSimplifiedLanguage "ChineseSimplified.isl"
 #endif
 
 [Languages]
