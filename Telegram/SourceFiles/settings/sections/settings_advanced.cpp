@@ -1036,7 +1036,7 @@ void BuildUpdateSection(SectionBuilder &builder, bool atTop) {
 	const auto version = tr::lng_settings_current_version(
 		tr::now,
 		lt_version,
-		currentVersionText());
+		u"v"_q + currentVersionText());
 
 	const auto texts = container
 		? Ui::CreateChild<rpl::event_stream<QString>>(container)
@@ -1427,7 +1427,7 @@ void SetupUpdate(not_null<Ui::VerticalLayout*> container) {
 	const auto version = tr::lng_settings_current_version(
 		tr::now,
 		lt_version,
-		currentVersionText());
+		u"v"_q + currentVersionText());
 	const auto toggle = container->add(object_ptr<Button>(
 		container,
 		tr::lng_settings_update_automatically(),

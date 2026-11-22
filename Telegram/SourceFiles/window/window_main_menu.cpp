@@ -403,7 +403,7 @@ MainMenu::MainMenu(
 				: tr::lng_settings_current_version(
 					tr::now,
 					lt_version,
-					currentVersionShortText()),
+					u"v"_q + currentVersionShortText()),
 			1) // Link 1.
 		.append(QChar(' '))
 		.append(QChar(8211))

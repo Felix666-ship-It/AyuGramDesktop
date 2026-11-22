@@ -66,7 +66,7 @@ void AboutBox(not_null<Ui::GenericBox*> box, Window::SessionController* controll
 			tr::lng_about_version(
 				tr::now,
 				lt_version,
-				currentVersionText()),
+				u"v"_q + currentVersionText()),
 			st::aboutVersionLink),
 		QMargins(
 			st::boxRowPadding.left(),

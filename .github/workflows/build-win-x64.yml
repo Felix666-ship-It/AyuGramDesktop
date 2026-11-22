@@ -58,13 +58,9 @@ jobs:
           $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
           if ($isTag) {
             $version = $refName.Substring(1)
-            $parts = $version.Split('.')
-            $major = if ($parts.Count -gt 0) { [int]$parts[0] } else { 0 }
-            $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
-            $patch = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
             $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
-            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002009 }
-            $numeric = $appVersion + ($major * 1000000) + ($minor * 1000) + $patch
+            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+            $numeric = $appVersion
           } else {
             $version = '0.0.0'
             $numeric = 0
@@ -351,13 +347,9 @@ jobs:
           $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
           if ($isTag) {
             $version = $refName.Substring(1)
-            $parts = $version.Split('.')
-            $major = if ($parts.Count -gt 0) { [int]$parts[0] } else { 0 }
-            $minor = if ($parts.Count -gt 1) { [int]$parts[1] } else { 0 }
-            $patch = if ($parts.Count -gt 2) { [int]$parts[2] } else { 0 }
             $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
-            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002009 }
-            $numeric = $appVersion + ($major * 1000000) + ($minor * 1000) + $patch
+            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+            $numeric = $appVersion
           } else {
             $version = '0.0.0'
             $numeric = 0
@@ -460,15 +452,17 @@ jobs:
             win64 = [ordered]@{
               stable = [ordered]@{
                 released = [int]$env:RELEASE_VERSION
-                link = $link
+                link = "/$link"
               }
             }
           } | ConvertTo-Json -Depth 5
-          [IO.File]::WriteAllText(
-            (Join-Path (Get-Location).Path 'current'),
-            $current,
-            [Text.UTF8Encoding]::new($false))
-          Get-Content 'current'
+          foreach ($name in @('current6', 'current')) {
+            [IO.File]::WriteAllText(
+              (Join-Path (Get-Location).Path $name),
+              $current,
+              [Text.UTF8Encoding]::new($false))
+          }
+          Get-Content 'current6'
 
       - name: Upload final package
         uses: actions/upload-artifact@v4
@@ -481,6 +475,7 @@ jobs:
             AyuGramMod-Setup-x64-*.exe
             tx64upd*
             current
+            current6
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -491,6 +486,7 @@ jobs:
             AyuGramMod-Setup-x64-*.exe
             tx64upd*
             current
+            current6
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
