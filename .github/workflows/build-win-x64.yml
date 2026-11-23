@@ -7,6 +7,10 @@ on:
         description: 'Run ID of an existing win-x64-staged artifact to package without rebuilding'
         required: false
         default: ''
+      repack_update_run_id:
+        description: 'Run ID of an existing win-x64-staged artifact to re-sign into a new update package'
+        required: false
+        default: ''
   push:
     branches:
       - feature/batch-download-media
@@ -18,7 +22,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: build-win-x64-${{ github.ref }}
+  group: build-win-x64-${{ github.ref }}-${{ github.event_name }}-${{ github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -56,10 +60,16 @@ jobs:
 
           $refName = '${{ github.ref_name }}'
           $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
-          if ($isTag) {
-            $version = $refName.Substring(1)
-            $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
-            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+          $isRepack = ('${{ inputs.repack_update_run_id }}' -ne '')
+          $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
+          $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+          if ($isTag -or $isRepack) {
+            if ($isTag) {
+              $version = $refName.Substring(1)
+            } else {
+              $appVersionStrLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersionStr\s+(\S+)' | Select-Object -First 1
+              $version = if ($appVersionStrLine) { $appVersionStrLine.Matches[0].Groups[1].Value } else { '0.0.2' }
+            }
             $numeric = $appVersion
           } else {
             $version = '0.0.0'
@@ -176,9 +186,10 @@ jobs:
         shell: pwsh
         run: |
           $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
+          $isRepack = ('${{ inputs.repack_update_run_id }}' -ne '')
           $secret = $env:UPDATES_PRIVATE_KEY
-          if ($isTag -and [string]::IsNullOrWhiteSpace($secret)) {
-            throw 'UPDATES_PRIVATE_KEY is required for tag releases.'
+          if (($isTag -or $isRepack) -and [string]::IsNullOrWhiteSpace($secret)) {
+            throw 'UPDATES_PRIVATE_KEY is required for signed update packages.'
           }
 
           $pem = ''
@@ -223,8 +234,28 @@ jobs:
         run: configure.bat -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT= -DDESKTOP_APP_SPECIAL_TARGET=win64 -DTDESKTOP_API_ID=%API_ID% -DTDESKTOP_API_HASH=%API_HASH% -DDESKTOP_APP_DISABLE_AUTOUPDATE=OFF
 
       - name: Build Release
+        if: inputs.repack_update_run_id == ''
         shell: cmd
         run: cmake --build out --target Telegram Updater Packer -j 4
+
+      - name: Build Packer only (repack)
+        if: inputs.repack_update_run_id != ''
+        shell: pwsh
+        run: |
+          cmake --build out --target Packer -j 4
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Packer build failed.'
+          }
+          $output = if (Test-Path 'out/Release/Packer.exe') {
+            'out/Release'
+          } elseif (Test-Path 'out/Packer.exe') {
+            'out'
+          } else {
+            throw 'Packer.exe was not produced'
+          }
+          "BUILD_OUTPUT=$output" >> $env:GITHUB_ENV
+          Get-Item (Join-Path $output 'Packer.exe') |
+            Format-List FullName,Length,LastWriteTime
 
       - name: Remove generated signing header
         if: always()
@@ -232,6 +263,7 @@ jobs:
         run: Remove-Item 'Telegram/SourceFiles/_other/packer_private.h' -Force -ErrorAction SilentlyContinue
 
       - name: Verify binaries
+        if: inputs.repack_update_run_id == ''
         shell: pwsh
         run: |
           $output = if (Test-Path 'out/Release/AyuGramMod.exe') {
@@ -251,6 +283,7 @@ jobs:
           }
 
       - name: Stage deploy directory
+        if: inputs.repack_update_run_id == ''
         shell: pwsh
         run: |
           $source = $env:BUILD_OUTPUT
@@ -272,12 +305,46 @@ jobs:
             Copy-Item $modules $deploy -Recurse
           }
 
+      - name: Download staged build for repack
+        if: inputs.repack_update_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: win-x64-staged
+          path: repack-staged
+          run-id: ${{ inputs.repack_update_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore staged build for repack
+        if: inputs.repack_update_run_id != ''
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'repack-staged' -Recurse -Filter 'AyuGramMod.exe' -File |
+            Select-Object -First 1
+          if (!$exe) {
+            throw 'AyuGramMod.exe not found in the staged artifact.'
+          }
+          $artifactDeploy = $exe.Directory.FullName
+          if (Test-Path 'out/deploy') {
+            Remove-Item 'out/deploy' -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path 'out/deploy' | Out-Null
+          Copy-Item (Join-Path $artifactDeploy '*') 'out/deploy' -Recurse -Force
+          if (!(Test-Path 'out/deploy/AyuGramMod.exe')) {
+            throw 'Restored out/deploy/AyuGramMod.exe is missing.'
+          }
+          if (!(Test-Path 'out/deploy/Updater.exe')) {
+            throw 'Restored out/deploy/Updater.exe is missing.'
+          }
+          Remove-Item 'out/update-package' -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path 'out/update-package' -Force | Out-Null
+          Write-Output "Restored deploy root: $artifactDeploy"
+
       - name: Build signed native update
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.repack_update_run_id != '' }}
         shell: pwsh
         run: |
           if ([int]$env:RELEASE_VERSION -le 0) {
-            throw 'Tag must contain a valid numeric version.'
+            throw 'A signed update requires a valid numeric version.'
           }
           $source = $env:BUILD_OUTPUT
           $updateDir = 'out/update-package'
@@ -286,13 +353,34 @@ jobs:
           }
           New-Item -ItemType Directory -Path $updateDir | Out-Null
 
-          $deployPath = (Resolve-Path 'out/deploy').Path
+          $deployRoot = (Resolve-Path 'out/deploy').Path
+          $packFiles = Get-ChildItem -LiteralPath $deployRoot -File -Recurse |
+            Where-Object {
+              $_.Name -notin @('Packer.exe', 'Packer.pdb') -and
+              $_.Name -notlike 'tx64upd*'
+            } |
+            Sort-Object FullName
+          $main = $packFiles | Where-Object { $_.Name -eq 'AyuGramMod.exe' } |
+            Select-Object -First 1
+          if (!$main) {
+            throw 'AyuGramMod.exe is missing from the deploy root.'
+          }
+          $packFiles = @($main) + @($packFiles | Where-Object {
+            $_.FullName -ne $main.FullName
+          })
+          if (!$packFiles -or $packFiles[0].Name -ne 'AyuGramMod.exe') {
+            throw 'Packer input must start with AyuGramMod.exe at the deploy root.'
+          }
+
+          $packArgs = @('-target', 'win64', '-version', $env:RELEASE_VERSION)
+          foreach ($file in $packFiles) {
+            $packArgs += @('-path', $file.FullName)
+          }
+          Write-Output "Packer arguments: $($packArgs -join ' ')"
+
           Push-Location $source
           try {
-            & (Join-Path (Get-Location) 'Packer.exe') `
-              -path $deployPath `
-              -target win64 `
-              -version $env:RELEASE_VERSION
+            & (Join-Path (Get-Location) 'Packer.exe') @packArgs
             if ($LASTEXITCODE -ne 0) {
               throw 'Packer signing failed.'
             }
@@ -304,7 +392,10 @@ jobs:
           if (!(Test-Path $updateFile)) {
             throw "Packer output not found: $updateFile"
           }
-          Move-Item $updateFile (Join-Path $updateDir "tx64upd$env:RELEASE_VERSION") -Force
+          $moved = Join-Path $updateDir "tx64upd$env:RELEASE_VERSION"
+          Move-Item $updateFile $moved -Force
+          $info = Get-Item $moved
+          Write-Output "Moved update package: $($info.FullName) ($($info.Length) bytes)"
 
       - name: Remove Packer and private key material
         if: always()
@@ -345,10 +436,16 @@ jobs:
         run: |
           $refName = '${{ github.ref_name }}'
           $isTag = ('${{ github.ref }}' -like 'refs/tags/v*')
-          if ($isTag) {
-            $version = $refName.Substring(1)
-            $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
-            $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+          $isRepack = ('${{ inputs.repack_update_run_id }}' -ne '')
+          $appVersionLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersion\s+(\d+)' | Select-Object -First 1
+          $appVersion = if ($appVersionLine) { [int]$appVersionLine.Matches[0].Groups[1].Value } else { 7002010 }
+          if ($isTag -or $isRepack) {
+            if ($isTag) {
+              $version = $refName.Substring(1)
+            } else {
+              $appVersionStrLine = Select-String -Path 'Telegram/build/version' -Pattern '^AppVersionStr\s+(\S+)' | Select-Object -First 1
+              $version = if ($appVersionStrLine) { $appVersionStrLine.Matches[0].Groups[1].Value } else { '0.0.2' }
+            }
             $numeric = $appVersion
           } else {
             $version = '0.0.0'
@@ -435,7 +532,7 @@ jobs:
           Get-Item "$env:SETUP_NAME.exe" | Format-List FullName,Length
 
       - name: Generate current manifest
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.repack_update_run_id != '' }}
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:UPDATE_FILE) -or
@@ -478,7 +575,7 @@ jobs:
             current6
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: ${{ startsWith(github.ref, 'refs/tags/v') && inputs.repack_update_run_id == '' }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
