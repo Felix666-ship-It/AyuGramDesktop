@@ -1185,7 +1185,7 @@ private:
 #ifdef Q_OS_MAC
 	bool _hardwareAcceleratedVideo = true;
 #else // Q_OS_MAC
-	bool _hardwareAcceleratedVideo = false;
+	bool _hardwareAcceleratedVideo = true;
 #endif // Q_OS_MAC
 	HistoryView::DoubleClickQuickAction _chatQuickAction
 		= HistoryView::DoubleClickQuickAction();

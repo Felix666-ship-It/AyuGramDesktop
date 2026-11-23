@@ -1272,7 +1272,7 @@ void BuildExportSection(SectionBuilder &builder) {
 
 	builder.addButton({
 		.id = u"advanced/experimental"_q,
-		.title = tr::lng_settings_experimental(),
+		.title = rpl::single(u"实验性功能设置"_q),
 		.icon = { &st::menuIconExperimental },
 		.onClick = [showOther] { showOther(Experimental::Id()); },
 		.keywords = { u"experimental"_q, u"beta"_q, u"features"_q },

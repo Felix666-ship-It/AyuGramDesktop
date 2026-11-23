@@ -166,6 +166,243 @@ struct ResolvedReferrer {
 	return QString();
 }
 
+struct LocalizedOptionText {
+	QString name;
+	QString description;
+	bool found = false;
+};
+
+[[nodiscard]] LocalizedOptionText LocalizedOption(const QString &id) {
+	if (id == u"forum-hide-chats-list"_q) {
+		return { u"在论坛中隐藏聊天列表"_q, u"不保留窄幅聊天列表栏。"_q, true };
+	} else if (id == u"dialogs-unread-on-top"_q) {
+		return {
+			u"未静音未读聊天置顶"_q,
+			u"将收到新未静音消息的聊天排在置顶聊天下方，并保持到已读。"_q,
+			true,
+		};
+	} else if (id == u"dialogs-mute-icon"_q) {
+		return {
+			u"聊天列表中的静音图标"_q,
+			u"在已静音聊天名称旁显示小静音图标。"_q,
+			true,
+		};
+	} else if (id == u"use-new-chat-view"_q) {
+		return { u"新版聊天视图"_q, u"通过新分区打开聊天。"_q, true };
+	} else if (id == u"auto-scroll-inactive-chat"_q) {
+		return {
+			u"将非活动聊天标记为已读"_q,
+			u"窗口未聚焦时也将新消息标记为已读并滚动聊天。"_q,
+			true,
+		};
+	} else if (id == u"moderate-common-groups"_q) {
+		return { u"一次封禁多个群组中的用户。"_q, QString(), true };
+	} else if (id == u"classic-profile-scroll"_q) {
+		return {
+			u"使用经典个人资料滚动处理。"_q,
+			u"将个人资料封面滚动恢复为之前的（基于填充的）实现。"_q,
+			true,
+		};
+	} else if (id == u"use-small-msg-bubble-radius"_q) {
+		return {
+			u"使用更小的消息气泡圆角"_q,
+			u"使大多数消息气泡接近方形。"_q,
+			true,
+		};
+	} else if (id == u"unlimited-message-width"_q) {
+		return {
+			u"无限消息宽度"_q,
+			u"允许纯文本消息气泡超过默认最大宽度。"_q,
+			true,
+		};
+	} else if (id == u"mac-cmd-reply-immediately"_q) {
+		return {
+			u"Mac：Cmd + 上/下键立即回复"_q,
+			u"按 Cmd + 上/下键时直接回复上一条或下一条消息，而不是先移动输入光标。按住 Shift 仍可移动光标。"_q,
+			true,
+		};
+	} else if (id == u"hide-ai-button"_q) {
+		return {
+			u"隐藏 AI 按钮"_q,
+			u"隐藏消息输入框中的 AI 工具按钮。"_q,
+			true,
+		};
+	} else if (id == u"force-compose-search-one-column"_q) {
+		return {
+			u"强制在聊天中使用内嵌搜索"_q,
+			u"在单列模式下强制使用聊天内嵌搜索。"_q,
+			true,
+		};
+	} else if (id == u"view-profile-in-chats-list-context-menu"_q) {
+		return {
+			u"添加「查看个人资料」"_q,
+			u"在聊天列表右键菜单中添加「查看个人资料」。"_q,
+			true,
+		};
+	} else if (id == u"show-peer-id-below-about"_q) {
+		return {
+			u"在个人资料中显示 Peer ID"_q,
+			u"在用户简介/描述下方显示来自 API 的 Peer ID。将联系人 ID 添加到导出数据。"_q,
+			true,
+		};
+	} else if (id == u"show-channel-joined-below-about"_q) {
+		return {
+			u"在个人资料中显示频道加入日期"_q,
+			u"在频道描述下方显示加入时间。"_q,
+			true,
+		};
+	} else if (id == u"profile-media-tabs"_q) {
+		return {
+			u"在个人资料中以标签页显示共享媒体。"_q,
+			u"将个人资料中的共享媒体按钮替换为一排标签页，内嵌显示媒体列表。功能仍在开发中。"_q,
+			true,
+		};
+	} else if (id == u"profile-media-tabs-expanded"_q) {
+		return {
+			u"将个人资料媒体标签页拆分为照片和视频。"_q,
+			u"在个人资料中分别显示照片和视频标签页，而不是单一媒体标签页。"_q,
+			true,
+		};
+	} else if (id == u"tabbed-panel-show-on-click"_q) {
+		return {
+			u"点击显示标签面板"_q,
+			u"仅在点击后显示表情/贴纸/GIF 面板。"_q,
+			true,
+		};
+	} else if (id == u"unlimited-recent-stickers"_q) {
+		return {
+			u"无限最近贴纸"_q,
+			u"显示服务器提供的全部最近贴纸。"_q,
+			true,
+		};
+	} else if (id == u"disable-autoplay-next"_q) {
+		return {
+			u"禁用自动播放下一首"_q,
+			u"禁用自动播放下一首音频文件/语音消息/视频消息。"_q,
+			true,
+		};
+	} else if (id == u"external-media-viewer"_q) {
+		return {
+			u"外部媒体查看器"_q,
+			u"使用系统媒体查看器而不是内置查看器。"_q,
+			true,
+		};
+	} else if (id == u"ffmpeg-multithread"_q) {
+		return {
+			u"多线程视频解码"_q,
+			u"允许 FFmpeg 使用线程池进行解码，通常每个 CPU 线程对应一个线程。"_q,
+			true,
+		};
+	} else if (id == u"hide-reply-button"_q) {
+		return {
+			u"隐藏回复按钮"_q,
+			u"在通知中隐藏回复按钮。"_q,
+			true,
+		};
+	} else if (id == u"custom-notification"_q) {
+		return {
+			u"强制非原生通知可用"_q,
+			u"即使当前平台的自定义通知不可用，也允许禁用原生通知。"_q,
+			true,
+		};
+	} else if (id == u"gnotification"_q) {
+		return {
+			u"GNotification"_q,
+			u"强制启用 GLib 的 GNotification。禁用时使用自动检测。"_q,
+			true,
+		};
+	} else if (id == u"mac-modern-notifications"_q) {
+		return {
+			u"现代 macOS 通知"_q,
+			u"使用 UserNotifications 框架发送原生通知（macOS 10.14+）。系统将在首次启动时请求通知权限。"_q,
+			true,
+		};
+	} else if (id == u"fractional-scaling-enabled"_q) {
+		return {
+			u"启用精确 High DPI 缩放"_q,
+			u"严格遵循系统界面缩放设置。"_q,
+			true,
+		};
+	} else if (id == u"high-dpi-downscale"_q) {
+		return {
+			u"High DPI 降采样"_q,
+			u"严格遵循系统界面缩放设置（另一种实现，质量可能更好）。"_q,
+			true,
+		};
+	} else if (id == u"use-qt-rhi"_q) {
+		return {
+			u"使用 Qt RHI 渲染器"_q,
+			u"在 GPU 而非 CPU 上渲染主窗口。"_q,
+			true,
+		};
+	} else if (id == u"enable-vulkan-rhi"_q) {
+		return {
+			u"启用 Vulkan 渲染器"_q,
+			u"可用时使用 Vulkan 进行 GPU 渲染，而不是 OpenGL。"_q,
+			true,
+		};
+	} else if (id == u"freetype"_q) {
+		return {
+			u"FreeType 字体引擎"_q,
+			u"使用 Linux 的字体引擎而不是系统字体引擎。"_q,
+			true,
+		};
+	} else if (id == u"kinetic-scroller"_q) {
+		return { u"触摸板自定义惯性滚动"_q, QString(), true };
+	} else if (id == u"touchbar-disabled"_q) {
+		return { u"禁用 Touch Bar（仅 macOS）。"_q, QString(), true };
+	} else if (id == u"new-windows-size-as-first"_q) {
+		return {
+			u"调整新聊天窗口大小"_q,
+			u"以主窗口大小打开新窗口。"_q,
+			true,
+		};
+	} else if (id == u"prefer-ipv6"_q) {
+		return {
+			u"优先使用 IPv6"_q,
+			u"如果可用则优先使用 IPv6。需要启用「尝试通过 IPv6 连接」。"_q,
+			true,
+		};
+	} else if (id == u"skip-url-scheme-register"_q) {
+		return {
+			u"跳过 URL Scheme 注册"_q,
+			u"自动更新时不要重新注册 tg:// URL Scheme。"_q,
+			true,
+		};
+	} else if (id == u"deadlock-detector"_q) {
+		return {
+			u"死锁检测器"_q,
+			u"每 30 秒检查一次主线程是否仍有响应。"_q,
+			true,
+		};
+	} else if (id == u"webview-debug-enabled"_q) {
+		return {
+			u"启用 WebView 检查"_q,
+			u"在 WebView 窗口右键选择「检查」。（macOS 上启动 Safari，从开发菜单打开）"_q,
+			true,
+		};
+	} else if (id == u"webview-legacy-edge"_q) {
+		return {
+			u"强制使用旧版 Edge WebView"_q,
+			u"跳过现代 CoreWebView2 检查，在 Windows 上强制使用旧版 Edge WebView。"_q,
+			true,
+		};
+	} else if (id == u"fast-buttons-mode"_q) {
+		return {
+			u"快捷按钮模式"_q,
+			u"使用 1-9 键盘按键触发内联键盘按钮。"_q,
+			true,
+		};
+	} else if (id == u"folder-favorite-link"_q) {
+		return {
+			u"收藏文件夹按钮"_q,
+			u"文件夹栏底部的收藏按钮，可打开 tg:// 或 t.me/ 链接。"_q,
+			true,
+		};
+	}
+	return {};
+}
+
 void SetupCopyDeepLink(
 		not_null<Window::Controller*> window,
 		not_null<Button*> button,
@@ -180,10 +417,10 @@ void SetupCopyDeepLink(
 		*menu = base::make_unique_q<Ui::PopupMenu>(
 			button,
 			st::popupMenuWithIcons);
-		(*menu)->addAction(u"Copy deep link"_q, [=] {
+		(*menu)->addAction(u"复制深层链接"_q, [=] {
 			TextUtilities::SetClipboardText({ link });
 			window->showToast({
-				.text = { u"Deep link copied to clipboard."_q },
+				.text = { u"深层链接已复制到剪贴板。"_q },
 				.iconLottie = u"toast/voip_invite"_q,
 				.iconLottieSize = st::toastLottieIconSize,
 			});
@@ -253,8 +490,13 @@ QString AddOption(
 		rpl::producer<> reloadOptionsRequests,
 		rpl::producer<QString> query,
 		Fn<void(const QString&, not_null<QWidget*>)> registerHighlight) {
-	const auto name = option.name().isEmpty() ? option.id() : option.name();
-	const auto &description = option.description();
+	const auto localized = LocalizedOption(option.id());
+	const auto name = localized.found
+		? localized.name
+		: (option.name().isEmpty() ? option.id() : option.name());
+	const auto description = localized.found
+		? localized.description
+		: option.description();
 
 	const auto wrap = container->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
@@ -323,7 +565,7 @@ QString AddOption(
 			if (!option.relevant() && toggled != option.defaultValue()) {
 				toggles->fire_copy(option.defaultValue());
 				window->showToast(
-					tr::lng_settings_experimental_irrelevant(tr::now));
+					u"此选项不适用于当前系统。"_q);
 				return;
 			}
 			option.set(toggled);
@@ -353,10 +595,13 @@ QString AddFavoriteLinkButton(
 		Fn<void(const QString&, not_null<QWidget*>)> registerHighlight) {
 	const auto option = &base::options::lookup<QString>(
 		Window::kOptionFolderFavoriteLink);
-	const auto name = option->name().isEmpty()
-		? option->id()
-		: option->name();
-	const auto &description = option->description();
+	const auto localized = LocalizedOption(option->id());
+	const auto name = localized.found
+		? localized.name
+		: (option->name().isEmpty() ? option->id() : option->name());
+	const auto description = localized.found
+		? localized.description
+		: option->description();
 
 	const auto wrap = container->add(
 		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
@@ -419,7 +664,7 @@ void SetupExperimental(
 	header->add(
 		object_ptr<Ui::FlatLabel>(
 			header,
-			tr::lng_settings_experimental_about(),
+			rpl::single(u"警告！这些是实验性设置。部分设置可能无法正常工作，另一些可能导致应用异常。其中任何一项都可能在下一版本中无声消失。请自行承担使用风险。"_q),
 			st::boxLabel),
 		st::defaultBoxDividerLabelPadding);
 
@@ -434,7 +679,7 @@ void SetupExperimental(
 		Ui::AddSkip(inner, st::settingsCheckboxesSkip);
 		reset = inner->add(object_ptr<Button>(
 			inner,
-			tr::lng_settings_experimental_restore(),
+			rpl::single(u"恢复默认值"_q),
 			st::settingsButtonNoIcon));
 		reset->addClickHandler([=] {
 			base::options::reset();
@@ -457,7 +702,7 @@ void SetupExperimental(
 	};
 	const auto categories = std::vector<Category>{
 		{
-			u"Chats"_q,
+			u"聊天"_q,
 			{
 				Dialogs::kOptionForumHideChatsList,
 				Dialogs::kOptionDialogsUnreadOnTop,
@@ -469,7 +714,7 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"Messages"_q,
+			u"消息"_q,
 			{
 				Ui::kOptionUseSmallMsgBubbleRadius,
 				HistoryView::kOptionUnlimitedMessageWidth,
@@ -479,7 +724,7 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"Profile"_q,
+			u"个人资料"_q,
 			{
 				Window::kOptionViewProfileInChatsListContextMenu,
 				Info::Profile::kOptionShowPeerIdBelowAbout,
@@ -489,14 +734,14 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"Stickers and emoji"_q,
+			u"贴纸与表情"_q,
 			{
 				ChatHelpers::kOptionTabbedPanelShowOnClick,
 				ChatHelpers::kOptionUnlimitedRecentStickers,
 			}
 		},
 		{
-			u"Media"_q,
+			u"媒体"_q,
 			{
 				Media::Player::kOptionDisableAutoplayNext,
 				Window::kOptionExternalMediaViewer,
@@ -504,7 +749,7 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"Notifications"_q,
+			u"通知"_q,
 			{
 				Window::Notifications::kOptionHideReplyButton,
 				Window::Notifications::kOptionCustomNotification,
@@ -513,7 +758,7 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"Interface"_q,
+			u"界面"_q,
 			{
 				Core::kOptionFractionalScalingEnabled,
 				Core::kOptionHighDpiDownscale,
@@ -528,7 +773,7 @@ void SetupExperimental(
 			}
 		},
 		{
-			u"System"_q,
+			u"系统"_q,
 			{
 				MTP::details::kOptionPreferIPv6,
 				Core::kOptionSkipUrlSchemeRegister,
@@ -595,7 +840,7 @@ void SetupExperimental(
 		});
 	}
 
-	addCategory(u"Other"_q, [&](
+	addCategory(u"其他"_q, [&](
 			not_null<Ui::VerticalLayout*> inner,
 			std::vector<QString> &searchable) {
 		if (base::options::lookup<bool>(kOptionFastButtonsMode).value()) {
@@ -621,18 +866,18 @@ Experimental::Experimental(
 Experimental::~Experimental() = default;
 
 rpl::producer<QString> Experimental::title() {
-	return tr::lng_settings_experimental();
+	return rpl::single(u"实验性功能设置"_q);
 }
 
 void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 	const auto window = &controller()->window();
 	addAction(
-		u"Export"_q,
+		u"导出"_q,
 		[=] {
 			TextUtilities::SetClipboardText(
 				{ EncodeOptionsToText(base::options::serialize()) });
 			window->showToast({
-				.text = { u"Experimental settings code copied to clipboard."_q },
+				.text = { u"实验性功能设置代码已复制到剪贴板。"_q },
 				.iconLottie = u"toast/copy"_q,
 				.iconLottieSize = st::toastLottieIconSize,
 			});
@@ -642,23 +887,20 @@ void Experimental::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
 		return;
 	}
 	addAction(
-		u"Import"_q,
+		u"导入"_q,
 		[=] {
 			const auto decoded = DecodeOptionsFromText(
 				QGuiApplication::clipboard()->text());
 			if (!decoded.ok) {
-				window->showToast(u"Clipboard does not contain "
-					"a valid experimental settings code."_q);
+				window->showToast(u"剪贴板中没有有效的实验性功能设置代码。"_q);
 				return;
 			}
 			if (!base::options::deserialize(decoded.json)) {
-				window->showToast(u"Experimental settings code is valid"
-					", but data format is not supported."_q);
+				window->showToast(u"实验性功能设置代码有效，但数据格式不受支持。"_q);
 				return;
 			}
 			_reloadOptionsRequests.fire({});
-			window->showToast(u"Experimental settings imported "
-				"from code in clipboard."_q);
+			window->showToast(u"已从剪贴板代码导入实验性功能设置。"_q);
 		},
 		&st::menuIconImportTheme);
 }

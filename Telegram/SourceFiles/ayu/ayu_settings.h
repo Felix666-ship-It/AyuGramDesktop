@@ -643,14 +643,14 @@ private:
 	rpl::variable<bool> _collapseSimilarChannels = true;
 	rpl::variable<bool> _hideSimilarChannels = false;
 	rpl::variable<int> _messageBubbleRadius = 16;
-	rpl::variable<bool> _disableOpenLinkWarning = false;
+	rpl::variable<bool> _disableOpenLinkWarning = true;
 	rpl::variable<double> _wideMultiplier = 1.0;
 	rpl::variable<bool> _spoofWebviewAsAndroid = false;
 	rpl::variable<bool> _increaseWebviewHeight = false;
 	rpl::variable<bool> _increaseWebviewWidth = false;
 	rpl::variable<bool> _materialSwitches = true;
 	rpl::variable<bool> _removeMessageTail = false;
-	rpl::variable<bool> _disableNotificationsDelay = false;
+	rpl::variable<bool> _disableNotificationsDelay = true;
 	rpl::variable<bool> _batchDownloadSubfoldersForSeparateGroups = false;
 	rpl::variable<bool> _defaultWeChatThemeApplied = false;
 	rpl::variable<bool> _localPremium = false;

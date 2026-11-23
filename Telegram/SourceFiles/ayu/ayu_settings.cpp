@@ -1212,14 +1212,14 @@ void from_json(const nlohmann::json &j, AyuSettings &s) {
 	s._collapseSimilarChannels = j.value("collapseSimilarChannels", defaults._collapseSimilarChannels.current());
 	s._hideSimilarChannels = j.value("hideSimilarChannels", defaults._hideSimilarChannels.current());
 	s._messageBubbleRadius = j.value("messageBubbleRadius", defaults._messageBubbleRadius.current());
-	s._disableOpenLinkWarning = j.value("disableOpenLinkWarning", defaults._disableOpenLinkWarning.current());
+	s._disableOpenLinkWarning = j.value("disableOpenLinkWarning", true);
 	s._wideMultiplier = j.value("wideMultiplier", defaults._wideMultiplier.current());
 	s._spoofWebviewAsAndroid = j.value("spoofWebviewAsAndroid", defaults._spoofWebviewAsAndroid.current());
 	s._increaseWebviewHeight = j.value("increaseWebviewHeight", defaults._increaseWebviewHeight.current());
 	s._increaseWebviewWidth = j.value("increaseWebviewWidth", defaults._increaseWebviewWidth.current());
 	s._materialSwitches = j.value("materialSwitches", defaults._materialSwitches.current());
 	s._removeMessageTail = j.value("removeMessageTail", defaults._removeMessageTail.current());
-	s._disableNotificationsDelay = j.value("disableNotificationsDelay", defaults._disableNotificationsDelay.current());
+	s._disableNotificationsDelay = j.value("disableNotificationsDelay", true);
 	s._batchDownloadSubfoldersForSeparateGroups = j.value("batchDownloadSubfoldersForSeparateGroups", false);
 	s._defaultWeChatThemeApplied = j.value("defaultWeChatThemeApplied", false);
 	s._localPremium = j.value("localPremium", defaults._localPremium.current());
