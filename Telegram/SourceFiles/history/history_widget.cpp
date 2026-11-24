@@ -215,7 +215,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_layers.h"
 
 #include <QtGui/QWindow>
+#include <QtGui/QCursor>
 #include <QtCore/QMimeData>
+
+#include <memory>
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
@@ -11056,10 +11059,14 @@ void HistoryWidget::batchDownloadSelected() {
 	if (ids.empty()) {
 		return;
 	}
-	session().batchDownload().chooseFolderAndStart(
+	_batchDownloadMenu = session().batchDownload().MakeModeMenu(
+		this,
 		controller(),
 		std::move(ids),
 		crl::guard(this, [=] { clearSelected(); }));
+	if (_batchDownloadMenu) {
+		_batchDownloadMenu->popup(QCursor::pos());
+	}
 }
 
 void HistoryWidget::escape() {

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "base/unique_qptr.h"
 #include "history/view/controls/history_view_compose_media_edit_manager.h"
 #include "history/view/history_view_corner_buttons.h"
 #include "history/history_drag_area.h"
@@ -77,6 +78,7 @@ class RoundButton;
 class PinnedBar;
 class GroupCallBar;
 class RequestsBar;
+class PopupMenu;
 struct PreparedList;
 struct PreparedBundle;
 class SendFilesWay;
@@ -821,6 +823,7 @@ private:
 
 	object_ptr<Ui::IconButton> _fieldBarCancel;
 
+	base::unique_qptr<Ui::PopupMenu> _batchDownloadMenu;
 	std::unique_ptr<Ui::RpWidget> _topBars;
 
 	std::unique_ptr<HistoryView::TranslateBar> _translateBar;

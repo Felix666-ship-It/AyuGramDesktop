@@ -136,6 +136,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QCoreApplication>
 #include <QtCore/QMimeData>
 
+#include <memory>
+#include <utility>
+
 // AyuGram includes
 #include "ayu/ayu_settings.h"
 #include "ayu/features/batch_download/batch_download.h"
@@ -3522,17 +3525,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 			addUnpinSelectedAction();
 			if (selectedState.canSaveMediaCount > 0) {
+				auto menu = controller->session().batchDownload().MakeModeMenu(
+					_menu.get(),
+					controller,
+					getSelectedItems(),
+					crl::guard(this, [=] {
+						_widget->clearSelected();
+					}));
 				_menu->addAction(
 					tr::ayu_BatchDownload(tr::now),
-					[=] {
-						controller->session().batchDownload()
-							.chooseFolderAndStart(
-								controller,
-								getSelectedItems(),
-								crl::guard(this, [=] {
-									_widget->clearSelected();
-								}));
-					},
+					std::unique_ptr<Ui::PopupMenu>(menu.release()),
 					&st::menuIconDownload);
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {
@@ -3853,17 +3855,16 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 			addUnpinSelectedAction();
 			if (selectedState.canSaveMediaCount > 0) {
+				auto menu = controller->session().batchDownload().MakeModeMenu(
+					_menu.get(),
+					controller,
+					getSelectedItems(),
+					crl::guard(this, [=] {
+						_widget->clearSelected();
+					}));
 				_menu->addAction(
 					tr::ayu_BatchDownload(tr::now),
-					[=] {
-						controller->session().batchDownload()
-							.chooseFolderAndStart(
-								controller,
-								getSelectedItems(),
-								crl::guard(this, [=] {
-									_widget->clearSelected();
-								}));
-					},
+					std::unique_ptr<Ui::PopupMenu>(menu.release()),
 					&st::menuIconDownload);
 			}
 			if (selectedState.count > 0 && !hasCopyRestrictionForSelected()) {

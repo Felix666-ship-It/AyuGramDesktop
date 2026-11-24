@@ -7,12 +7,14 @@
 #pragma once
 
 #include "base/basic_types.h"
+#include "base/unique_qptr.h"
 #include "base/weak_ptr.h"
 #include "data/data_types.h"
 
 #include <memory>
 
 class DocumentData;
+class QWidget;
 
 namespace Data {
 class Media;
@@ -22,11 +24,21 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Ui {
+class PopupMenu;
+} // namespace Ui
+
 namespace Window {
 class SessionController;
 } // namespace Window
 
 namespace AyuFeatures::BatchDownload {
+
+enum class Mode {
+	Direct,
+	Group,
+	MergeByCaption,
+};
 
 [[nodiscard]] bool IsDownloadableMedia(Data::Media *media);
 [[nodiscard]] bool IsDownloadableDocument(DocumentData *document);
@@ -37,6 +49,13 @@ public:
 	~Manager();
 
 	void chooseFolderAndStart(
+		not_null<Window::SessionController*> controller,
+		MessageIdsList ids,
+		Mode mode,
+		Fn<void()> onStarted = nullptr);
+
+	[[nodiscard]] base::unique_qptr<Ui::PopupMenu> MakeModeMenu(
+		QWidget *parent,
 		not_null<Window::SessionController*> controller,
 		MessageIdsList ids,
 		Fn<void()> onStarted = nullptr);
