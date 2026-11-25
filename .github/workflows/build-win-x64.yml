@@ -12,8 +12,6 @@ on:
         required: false
         default: ''
   push:
-    branches:
-      - feature/batch-download-media
     tags:
       - 'v*'
 
