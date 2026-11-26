@@ -34,7 +34,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <deque>
 #include <memory>
 #include <vector>
 
@@ -112,22 +111,35 @@ namespace {
 }
 
 [[nodiscard]] QString UniqueFolderName(
+		const QString &parent,
 		QString base,
 		QSet<QString> &reserved) {
 	base = CleanFolderName(std::move(base));
 	if (base.isEmpty()) {
 		base = u"\u6d88\u606f"_q;
 	}
+	const auto folderWithSlash = FolderWithSlash(parent);
+	const auto isBusy = [&](const QString &name) {
+		const auto path = folderWithSlash + name;
+		return reserved.contains(path.toCaseFolded())
+			|| QFileInfo::exists(path);
+	};
 	auto candidate = base;
-	if (reserved.contains(candidate.toCaseFolded())) {
+	if (isBusy(candidate)) {
 		candidate = base + u" - \u526f\u672c"_q;
-		for (auto i = 2; reserved.contains(candidate.toCaseFolded()); ++i) {
+		for (auto i = 2; isBusy(candidate); ++i) {
 			candidate = base + u" - \u526f\u672c (%1)"_q.arg(i);
 		}
 	}
-	reserved.insert(candidate.toCaseFolded());
+	reserved.insert((folderWithSlash + candidate).toCaseFolded());
 	return candidate;
 }
+
+struct SharedState {
+	QSet<QString> reservedSequences;
+	QHash<QString, int> folderCounters;
+	QSet<QString> reservedFolders;
+};
 
 class Task final : public std::enable_shared_from_this<Task> {
 public:
@@ -137,12 +149,14 @@ public:
 		QString folder,
 		base::weak_ptr<Window::SessionController> controller,
 		Mode mode,
-		Fn<void()> onFinished)
+		std::shared_ptr<SharedState> shared,
+		Fn<void(Task*)> onFinished)
 	: _session(session)
 	, _controller(std::move(controller))
 	, _folder(QDir(folder).absolutePath())
 	, _ids(std::move(ids))
 	, _mode(mode)
+	, _shared(std::move(shared))
 	, _onFinished(std::move(onFinished)) {
 		std::sort(_ids.begin(), _ids.end(), [](const FullMsgId &a, const FullMsgId &b) {
 			return a.msg.bare < b.msg.bare;
@@ -168,8 +182,14 @@ public:
 		if (_finished) {
 			return;
 		}
+		[[maybe_unused]] const auto keepAlive = shared_from_this();
+		const auto count = countDownloadable();
+		if (!count) {
+			finish();
+			return;
+		}
 		if (!QDir().mkpath(_folder)) {
-			_failed = int(_ids.size());
+			_failed = count;
 			_index = int(_ids.size());
 			finish();
 			return;
@@ -207,9 +227,7 @@ public:
 			advance();
 		}, _lifetime);
 
-		if (!_ids.empty()) {
-			showStartToast();
-		}
+		showStartToast(count);
 		advance();
 	}
 
@@ -239,8 +257,57 @@ private:
 		uint64 generation = 0;
 	};
 
+	[[nodiscard]] int countDownloadable() const {
+		auto result = 0;
+		for (const auto &id : _ids) {
+			const auto item = _session->data().message(id);
+			if (item && IsDownloadableMedia(item->media())) {
+				++result;
+			}
+		}
+		return result;
+	}
+
+	void prepareDirectFolder() {
+		auto caption = QString();
+		auto firstId = FullMsgId();
+		auto hasItem = false;
+		auto hasMedia = false;
+		for (const auto &id : _ids) {
+			const auto item = _session->data().message(id);
+			if (!item) {
+				continue;
+			}
+			if (!hasItem) {
+				hasItem = true;
+				firstId = id;
+			}
+			if (caption.isEmpty()) {
+				caption = FirstLine(item->originalText().text);
+			}
+			if (!hasMedia && IsDownloadableMedia(item->media())) {
+				hasMedia = true;
+			}
+		}
+		if (!hasMedia) {
+			return;
+		}
+		auto base = CleanFolderName(caption);
+		if (base.isEmpty()) {
+			base = u"\u6d88\u606f_"_q
+				+ QString::number(firstId.msg.bare);
+		}
+		const auto name = UniqueFolderName(
+			_folder,
+			base,
+			_shared->reservedFolders);
+		_directFolder = FolderWithSlash(_folder) + name;
+		QDir().mkpath(_directFolder);
+	}
+
 	void prepareGroups() {
 		if (_mode == Mode::Direct) {
+			prepareDirectFolder();
 			return;
 		}
 		for (const auto &id : _ids) {
@@ -262,9 +329,11 @@ private:
 			return;
 		}
 
-		auto reservedFolders = QSet<QString>();
 		const auto addFolder = [&](const QString &base) {
-			const auto name = UniqueFolderName(base, reservedFolders);
+			const auto name = UniqueFolderName(
+				_folder,
+				base,
+				_shared->reservedFolders);
 			const auto path = FolderWithSlash(_folder) + name;
 			QDir().mkpath(path);
 			return path;
@@ -317,7 +386,7 @@ private:
 
 	[[nodiscard]] QString NextSequence(const QString &folder) {
 		const auto folderKey = folder.toCaseFolded();
-		auto counter = _folderCounters.value(folderKey, 1);
+		auto counter = _shared->folderCounters.value(folderKey, 1);
 		while (true) {
 			const auto sequence = QString::number(counter).rightJustified(
 				3,
@@ -325,80 +394,15 @@ private:
 			const auto path = FolderWithSlash(folder) + sequence;
 			const auto reserved = folderKey + u"|"_q + sequence;
 			if (!QFileInfo::exists(path)
-				&& !_reservedSequences.contains(reserved)
+				&& !_shared->reservedSequences.contains(reserved)
 				&& QDir(folder).entryList(
 					QStringList{ sequence + u".*"_q },
 					QDir::Files).isEmpty()) {
-				_reservedSequences.insert(reserved);
-				_folderCounters.insert(folderKey, counter + 1);
+				_shared->reservedSequences.insert(reserved);
+				_shared->folderCounters.insert(folderKey, counter + 1);
 				return sequence;
 			}
 			++counter;
-		}
-	}
-
-	void advance() {
-		if (_advancing || _finished) {
-			return;
-		}
-		_advancing = true;
-		while (true) {
-			if (_finished || _index >= int(_ids.size())) {
-				break;
-			}
-			const auto id = _ids[_index++];
-			const auto item = _session->data().message(id);
-			if (!item) {
-				++_skipped;
-				continue;
-			}
-			const auto media = item->media();
-			if (!media) {
-				++_skipped;
-				continue;
-			}
-			auto folder = _folder;
-			if (_mode != Mode::Direct) {
-				folder = _groupFolders.value(GroupKey(item), _folder);
-			}
-			if (const auto photo = media->photo()) {
-				if (photo->isNull()) {
-					++_skipped;
-					continue;
-				}
-				auto current = std::make_shared<Current>();
-				current->kind = Kind::Photo;
-				current->id = id;
-				current->folder = folder;
-				current->sequence = NextSequence(folder);
-				current->photo = photo;
-				current->generation = ++_generation;
-				_currents.push_back(current);
-				preparePhoto(current);
-			} else if (const auto document = media->document()) {
-				if (!IsDownloadableDocument(document)) {
-					++_skipped;
-					continue;
-				}
-				auto current = std::make_shared<Current>();
-				current->kind = Kind::Document;
-				current->id = id;
-				current->folder = folder;
-				current->sequence = NextSequence(folder);
-				current->document = document;
-				current->generation = ++_generation;
-				current->path = FolderWithSlash(current->folder)
-					+ current->sequence
-					+ DocumentExtension(document);
-				_currents.push_back(current);
-				prepareDocument(current);
-			} else {
-				++_skipped;
-			}
-		}
-		_advancing = false;
-		if (!_finished && _currents.empty() && _index >= int(_ids.size())) {
-			finish();
 		}
 	}
 
@@ -615,7 +619,75 @@ private:
 		_lifetime.destroy();
 		showResultToast();
 		[[maybe_unused]] const auto keepAlive = shared_from_this();
-		_onFinished();
+		_onFinished(this);
+	}
+
+	void advance() {
+		[[maybe_unused]] const auto keepAlive = shared_from_this();
+		if (_advancing || _finished) {
+			return;
+		}
+		_advancing = true;
+		while (true) {
+			if (_finished || _index >= int(_ids.size())) {
+				break;
+			}
+			const auto id = _ids[_index++];
+			const auto item = _session->data().message(id);
+			if (!item) {
+				++_skipped;
+				continue;
+			}
+			const auto media = item->media();
+			if (!media) {
+				++_skipped;
+				continue;
+			}
+			auto folder = _folder;
+			if (_mode == Mode::Direct) {
+				folder = _directFolder;
+			} else {
+				folder = _groupFolders.value(GroupKey(item), _folder);
+			}
+			if (const auto photo = media->photo()) {
+				if (photo->isNull()) {
+					++_skipped;
+					continue;
+				}
+				auto current = std::make_shared<Current>();
+				current->kind = Kind::Photo;
+				current->id = id;
+				current->folder = folder;
+				current->sequence = NextSequence(folder);
+				current->photo = photo;
+				current->generation = ++_generation;
+				_currents.push_back(current);
+				preparePhoto(current);
+			} else if (const auto document = media->document()) {
+				if (!IsDownloadableDocument(document)) {
+					++_skipped;
+					continue;
+				}
+				auto current = std::make_shared<Current>();
+				current->kind = Kind::Document;
+				current->id = id;
+				current->folder = folder;
+				current->sequence = NextSequence(folder);
+				current->document = document;
+				current->generation = ++_generation;
+				current->path = FolderWithSlash(current->folder)
+					+ current->sequence
+					+ DocumentExtension(document);
+				_currents.push_back(current);
+				prepareDocument(current);
+			} else {
+				++_skipped;
+			}
+		}
+		_advancing = false;
+		if (!_finished && _currents.empty() && _index >= int(_ids.size())) {
+			finish();
+		}
 	}
 
 	int findDocument(DocumentData *document) const {
@@ -640,8 +712,8 @@ private:
 		return -1;
 	}
 
-	void showStartToast() {
-		showToast(tr::ayu_BatchDownloadStarted(tr::now));
+	void showStartToast(int count) {
+		showToast(u"已开始批量下载（共 %1 项）"_q.arg(count));
 	}
 
 	void showResultToast() {
@@ -675,10 +747,10 @@ private:
 	const QString _folder;
 	MessageIdsList _ids;
 	const Mode _mode;
-	const Fn<void()> _onFinished;
+	const std::shared_ptr<SharedState> _shared;
+	const Fn<void(Task*)> _onFinished;
 	rpl::lifetime _lifetime;
-	QSet<QString> _reservedSequences;
-	QHash<QString, int> _folderCounters;
+	QString _directFolder;
 	std::vector<QString> _groupOrder;
 	QHash<QString, QString> _groupCaptions;
 	QHash<QString, FullMsgId> _groupFallback;
@@ -715,7 +787,7 @@ bool IsDownloadableMedia(Data::Media *media) {
 	return false;
 }
 
-class Manager::Impl {
+class Manager::Impl : public base::has_weak_ptr {
 public:
 	explicit Impl(not_null<Main::Session*> session)
 	: _session(session) {
@@ -727,39 +799,42 @@ public:
 		base::weak_ptr<Window::SessionController> controller,
 		Mode mode,
 		Fn<void()> onStarted) {
+		const auto weak = base::make_weak(this);
 		auto task = std::make_shared<Task>(
 			_session,
 			std::move(ids),
 			std::move(folder),
 			std::move(controller),
 			mode,
-			[this] { taskFinished(); });
-		_queue.push_back(std::move(task));
+			_shared,
+			[weak](Task *finished) {
+				if (const auto impl = weak.get()) {
+					impl->taskFinished(finished);
+				}
+			});
+		_activeTasks.push_back(std::move(task));
+		_activeTasks.back()->start();
 		if (onStarted) {
 			onStarted();
 		}
-		pump();
 	}
 
 private:
-	void pump() {
-		if (_active || _queue.empty()) {
-			return;
+	void taskFinished(Task *task) {
+		const auto i = std::find_if(
+			_activeTasks.begin(),
+			_activeTasks.end(),
+			[task](const std::shared_ptr<Task> &active) {
+				return active.get() == task;
+			});
+		if (i != _activeTasks.end()) {
+			_activeTasks.erase(i);
 		}
-		_active = std::move(_queue.front());
-		_queue.pop_front();
-		_active->start();
-	}
-
-	void taskFinished() {
-		_active = nullptr;
-		pump();
 	}
 
 	const not_null<Main::Session*> _session;
-	std::deque<std::shared_ptr<Task>> _queue;
-	std::shared_ptr<Task> _active;
-
+	std::shared_ptr<SharedState> _shared = std::make_shared<SharedState>();
+	std::vector<std::shared_ptr<Task>> _activeTasks;
 };
 
 Manager::Manager(not_null<Main::Session*> session)
@@ -830,7 +905,7 @@ base::unique_qptr<Ui::PopupMenu> Manager::MakeModeMenu(
 				}
 			});
 	};
-	add(Mode::Direct, u"直接下载（按序命名）"_q);
+	add(Mode::Direct, u"单文件夹下载（按序命名）"_q);
 	add(Mode::Group, u"按分组建子文件夹（按序命名）"_q);
 	add(Mode::MergeByCaption, u"按首条文本合并文件夹（按序命名）"_q);
 	return menu;
