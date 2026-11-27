@@ -213,6 +213,25 @@ void BuildQoLToggles(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 		.setter = &AyuSettings::setBatchDownloadSubfoldersForSeparateGroups,
 	});
 
+	ayu.addSlider({
+		.id = u"ayu/batchDownloadConcurrency"_q,
+		.title = rpl::single(u"批量下载最大并发数"_q),
+		.steps = 64,
+		.current = settings->batchDownloadConcurrency(),
+		.indexToValue = [](int index) {
+			return index + 1;
+		},
+		.onChanged = [](int value) {
+			AyuSettings::getInstance().setBatchDownloadConcurrency(value);
+		},
+		.onFinalChanged = [](int value) {
+			AyuSettings::getInstance().setBatchDownloadConcurrency(value);
+		},
+		.formatLabel = [](int value) {
+			return QString::number(value);
+		},
+	});
+
 	ayu.addSectionDivider();
 
 	const auto zalgoButton = builder.addButton({

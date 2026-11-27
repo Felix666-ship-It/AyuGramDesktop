@@ -38,6 +38,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 // AyuGram includes
 #include "ayu/ayu_settings.h"
+#include "ayu/features/batch_download/batch_download.h"
 #include "ayu/features/message_shot/message_shot.h"
 #include "ayu/utils/telegram_helpers.h"
 #include "styles/style_ayu_icons.h"
@@ -513,9 +514,12 @@ void BottomInfo::layoutDateText() {
 			: QString();
 		const auto author = settings.filterZalgo() ? filterZalgo(_data.author) : _data.author;
 		const auto prefix = !author.isEmpty() ? u", "_q : QString();
+		const auto downloaded = _data.batchDownloaded
+			? u"\u2713 \u5df2\u4e0b "_q
+			: QString();
 		const auto date = editedPrimary
-			? FormatEditedDate(_data.date, _data.editedDate)
-			: edited + ((_data.flags & Data::Flag::ForwardedDate)
+			? (downloaded + FormatEditedDate(_data.date, _data.editedDate))
+			: edited + downloaded + ((_data.flags & Data::Flag::ForwardedDate)
 			? Ui::FormatDateTimeSavedFrom(_data.date)
 			: formatMessageTime(_data.date.time()));
 		const auto afterAuthor = prefix + date;
@@ -608,8 +612,14 @@ void BottomInfo::layoutDateText() {
 			? Ui::FormatDateTimeSavedFrom(_data.date)
 			: formatMessageTime(_data.date.time());
 
+		auto downloaded = TextWithEntities{};
+		if (_data.batchDownloaded) {
+			downloaded.append(u"\u2713 \u5df2\u4e0b "_q);
+		}
+
 		const auto date = TextWithEntities{}
 			.append(edited)
+			.append(downloaded)
 			.append(dateStr);
 
 		const auto afterAuthor = TextWithEntities{}.append(prefix).append(date);
@@ -778,6 +788,7 @@ BottomInfo::Data BottomInfoDataFromMessage(not_null<Message*> message) {
 	auto result = BottomInfo::Data();
 	result.date = message->dateTime();
 	result.effectId = item->effectId();
+	result.batchDownloaded = AyuFeatures::BatchDownload::IsBatchDownloaded(item);
 	if (message->hasOutLayout()) {
 		result.flags |= Flag::OutLayout;
 	}

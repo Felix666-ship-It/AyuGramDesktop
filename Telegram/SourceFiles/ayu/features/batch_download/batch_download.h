@@ -14,6 +14,7 @@
 #include <memory>
 
 class DocumentData;
+class HistoryItem;
 class QWidget;
 
 namespace Data {
@@ -42,6 +43,9 @@ enum class Mode {
 
 [[nodiscard]] bool IsDownloadableMedia(Data::Media *media);
 [[nodiscard]] bool IsDownloadableDocument(DocumentData *document);
+
+void MarkBatchDownloaded(not_null<const HistoryItem*> item);
+[[nodiscard]] bool IsBatchDownloaded(not_null<const HistoryItem*> item);
 
 class Manager final : public base::has_weak_ptr {
 public:

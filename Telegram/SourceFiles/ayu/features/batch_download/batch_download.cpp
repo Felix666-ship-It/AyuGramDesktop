@@ -6,11 +6,14 @@
 // Copyright @Radolyn, 2026
 #include "ayu/features/batch_download/batch_download.h"
 
+#include "ayu/ayu_settings.h"
+#include "base/timer.h"
 #include "core/application.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
+#include "data/data_groups.h"
 #include "history/history_item.h"
 #include "data/data_download_manager.h"
 #include "data/data_file_origin.h"
@@ -20,6 +23,7 @@
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "settings.h"
 #include "ui/widgets/popup_menu.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
@@ -39,6 +43,10 @@
 
 namespace AyuFeatures::BatchDownload {
 namespace {
+
+constexpr auto kWatchdogInterval = crl::time(5000);
+constexpr auto kStallTimeout = crl::time(25000);
+constexpr auto kMaxRetries = 3;
 
 [[nodiscard]] QString FolderWithSlash(const QString &folder) {
 	return folder.endsWith('/') ? folder : (folder + '/');
@@ -135,11 +143,106 @@ namespace {
 	return candidate;
 }
 
+struct DownloadedState {
+	QSet<QString> keys;
+	bool loaded = false;
+};
+
+[[nodiscard]] DownloadedState &DownloadedMarks() {
+	static DownloadedState result;
+	return result;
+}
+
+[[nodiscard]] QString DownloadedFilePath() {
+	return cWorkingDir() + u"tdata/ayu_batch_downloaded.txt"_q;
+}
+
+void LoadDownloadedMarks() {
+	auto &state = DownloadedMarks();
+	if (state.loaded) {
+		return;
+	}
+	state.loaded = true;
+	auto file = QFile(DownloadedFilePath());
+	if (!file.open(QIODevice::ReadOnly)) {
+		return;
+	}
+	const auto lines = QString::fromUtf8(file.readAll()).split(QChar('\n'));
+	for (auto line : lines) {
+		line = line.trimmed();
+		if (!line.isEmpty()) {
+			state.keys.insert(line);
+		}
+	}
+}
+
+[[nodiscard]] QString DownloadedKey(not_null<const HistoryItem*> item) {
+	const auto history = item->history();
+	const auto userId = history->session().userId().bare;
+	const auto peerId = history->peer->id.value;
+	const auto groupId = item->groupId();
+	if (groupId.value != 0) {
+		return u"g:%1:%2:%3"_q
+			.arg(userId)
+			.arg(peerId)
+			.arg(groupId.value);
+	}
+	return u"m:%1:%2:%3"_q
+		.arg(userId)
+		.arg(peerId)
+		.arg(item->fullId().msg.bare);
+}
+
+void RefreshDownloadedMark(not_null<const HistoryItem*> item) {
+	const auto owner = &item->history()->owner();
+	if (const auto group = owner->groups().find(item)) {
+		for (const auto &other : group->items) {
+			owner->requestItemViewRefresh(other);
+			owner->requestItemResize(other);
+		}
+		return;
+	}
+	owner->requestItemViewRefresh(item);
+	owner->requestItemResize(item);
+}
+
+class Task;
+
 struct SharedState {
 	QSet<QString> reservedSequences;
 	QHash<QString, int> folderCounters;
 	QSet<QString> reservedFolders;
+	std::vector<std::weak_ptr<Task>> tasks;
+	rpl::lifetime lifetime;
+	int activeDownloads = 0;
+	bool waking = false;
+	bool shuttingDown = false;
+
+	SharedState();
+
+	[[nodiscard]] bool tryAcquire() {
+		const auto limit = std::clamp(
+			AyuSettings::getInstance().batchDownloadConcurrency(),
+			1,
+			64);
+		if (activeDownloads >= limit) {
+			return false;
+		}
+		++activeDownloads;
+		return true;
+	}
+
+	void release();
+	void registerTask(const std::shared_ptr<Task> &task);
+	void wakeTasks();
 };
+
+SharedState::SharedState() {
+	AyuSettings::getInstance().batchDownloadConcurrencyChanges(
+	) | rpl::on_next([this](int) {
+		wakeTasks();
+	}, lifetime);
+}
 
 class Task final : public std::enable_shared_from_this<Task> {
 public:
@@ -164,6 +267,7 @@ public:
 	}
 
 	~Task() {
+		_watchdog.cancel();
 		_lifetime.destroy();
 		for (const auto &current : _currents) {
 			if (current->active
@@ -175,6 +279,7 @@ public:
 			if (current->active && !current->path.isEmpty()) {
 				QFile::remove(current->path);
 			}
+			releaseSlot(current);
 		}
 	}
 
@@ -228,6 +333,14 @@ public:
 		}, _lifetime);
 
 		showStartToast(count);
+		_watchdog.setCallback([this] {
+			checkStalls();
+		});
+		_watchdog.callEach(kWatchdogInterval);
+		advance();
+	}
+
+	void wake() {
 		advance();
 	}
 
@@ -255,6 +368,11 @@ private:
 		std::shared_ptr<Data::PhotoMedia> photoMedia;
 		int photoAttempts = 0;
 		uint64 generation = 0;
+		int64 lastProgress = -1;
+		crl::time lastProgressAt = 0;
+		int retryCount = 0;
+		bool retrying = false;
+		bool slotHeld = true;
 	};
 
 	[[nodiscard]] int countDownloadable() const {
@@ -463,7 +581,7 @@ private:
 	}
 
 	void checkCurrent(const std::shared_ptr<Current> &current) {
-		if (!current->active) {
+		if (!current->active || current->retrying) {
 			return;
 		}
 		if (current->kind == Kind::Document) {
@@ -593,15 +711,99 @@ private:
 		finishCurrent(current, false);
 	}
 
+	void cancelCurrent(const std::shared_ptr<Current> &current) {
+		if (current->kind == Kind::Document && current->document) {
+			current->document->cancel();
+		} else if (current->kind == Kind::Photo && current->photo) {
+			current->photo->cancel();
+		}
+	}
+
+	void retryCurrent(const std::shared_ptr<Current> &current) {
+		if (!current->active || current->retrying) {
+			return;
+		}
+		current->retrying = true;
+		if (current->retryCount >= kMaxRetries) {
+			cancelCurrent(current);
+			failCurrent(current);
+			return;
+		}
+
+		++current->retryCount;
+		++current->generation;
+		cancelCurrent(current);
+		if (!current->path.isEmpty()) {
+			const auto info = QFileInfo(current->path);
+			if (info.exists() && info.size() == 0) {
+				QFile::remove(current->path);
+			}
+		}
+		current->lastProgress = 0;
+		current->lastProgressAt = crl::now();
+		current->state = State::None;
+		current->starting = false;
+		current->retrying = false;
+		if (current->kind == Kind::Document) {
+			prepareDocument(current);
+		} else {
+			preparePhoto(current);
+		}
+	}
+
+	void checkStalls() {
+		[[maybe_unused]] const auto keepAlive = shared_from_this();
+		if (_finished) {
+			return;
+		}
+		const auto now = crl::now();
+		const auto currents = _currents;
+		for (const auto &current : currents) {
+			if (!current->active || current->retrying) {
+				continue;
+			}
+			auto progress = int64(-1);
+			if (current->kind == Kind::Document
+				&& current->document
+				&& current->document->loading()) {
+				progress = current->document->loadOffset();
+			} else if (current->kind == Kind::Photo
+				&& current->photo
+				&& current->photo->loading(Data::PhotoSize::Large)) {
+				progress = current->photo->loadOffset();
+			}
+			if (progress < 0) {
+				continue;
+			}
+			if (progress > current->lastProgress) {
+				current->lastProgress = progress;
+				current->lastProgressAt = now;
+			} else if (now - current->lastProgressAt >= kStallTimeout) {
+				retryCurrent(current);
+			}
+		}
+	}
+
+	void releaseSlot(const std::shared_ptr<Current> &current) {
+		if (current->slotHeld) {
+			current->slotHeld = false;
+			_shared->release();
+		}
+	}
+
 	void finishCurrent(
 			const std::shared_ptr<Current> &current,
 			bool saved) {
 		if (!current->active) {
 			return;
 		}
+		[[maybe_unused]] const auto keepAlive = shared_from_this();
 		current->active = false;
 		if (saved) {
 			++_saved;
+			if (const auto item = _session->data().message(current->id)) {
+				MarkBatchDownloaded(item);
+			}
 		} else {
 			++_failed;
 		}
@@ -609,6 +811,7 @@ private:
 		if (i != _currents.end()) {
 			_currents.erase(i);
 		}
+		releaseSlot(current);
 	}
 
 	void finish() {
@@ -616,6 +819,7 @@ private:
 			return;
 		}
 		_finished = true;
+		_watchdog.cancel();
 		_lifetime.destroy();
 		showResultToast();
 		[[maybe_unused]] const auto keepAlive = shared_from_this();
@@ -628,19 +832,21 @@ private:
 			return;
 		}
 		_advancing = true;
-		while (true) {
-			if (_finished || _index >= int(_ids.size())) {
+		while (!_finished && _index < int(_ids.size())) {
+			if (!_shared->tryAcquire()) {
 				break;
 			}
 			const auto id = _ids[_index++];
 			const auto item = _session->data().message(id);
 			if (!item) {
 				++_skipped;
+				_shared->release();
 				continue;
 			}
 			const auto media = item->media();
 			if (!media) {
 				++_skipped;
+				_shared->release();
 				continue;
 			}
 			auto folder = _folder;
@@ -652,6 +858,7 @@ private:
 			if (const auto photo = media->photo()) {
 				if (photo->isNull()) {
 					++_skipped;
+					_shared->release();
 					continue;
 				}
 				auto current = std::make_shared<Current>();
@@ -661,11 +868,13 @@ private:
 				current->sequence = NextSequence(folder);
 				current->photo = photo;
 				current->generation = ++_generation;
+				current->lastProgressAt = crl::now();
 				_currents.push_back(current);
 				preparePhoto(current);
 			} else if (const auto document = media->document()) {
 				if (!IsDownloadableDocument(document)) {
 					++_skipped;
+					_shared->release();
 					continue;
 				}
 				auto current = std::make_shared<Current>();
@@ -675,6 +884,7 @@ private:
 				current->sequence = NextSequence(folder);
 				current->document = document;
 				current->generation = ++_generation;
+				current->lastProgressAt = crl::now();
 				current->path = FolderWithSlash(current->folder)
 					+ current->sequence
 					+ DocumentExtension(document);
@@ -682,6 +892,7 @@ private:
 				prepareDocument(current);
 			} else {
 				++_skipped;
+				_shared->release();
 			}
 		}
 		_advancing = false;
@@ -750,6 +961,7 @@ private:
 	const std::shared_ptr<SharedState> _shared;
 	const Fn<void(Task*)> _onFinished;
 	rpl::lifetime _lifetime;
+	base::Timer _watchdog;
 	QString _directFolder;
 	std::vector<QString> _groupOrder;
 	QHash<QString, QString> _groupCaptions;
@@ -764,6 +976,33 @@ private:
 	bool _advancing = false;
 	bool _finished = false;
 };
+
+void SharedState::release() {
+	if (activeDownloads > 0) {
+		--activeDownloads;
+	}
+	wakeTasks();
+}
+
+void SharedState::registerTask(const std::shared_ptr<Task> &task) {
+	tasks.push_back(task);
+}
+
+void SharedState::wakeTasks() {
+	if (waking || shuttingDown) {
+		return;
+	}
+	waking = true;
+	auto pending = std::move(tasks);
+	tasks.clear();
+	for (const auto &weak : pending) {
+		if (const auto task = weak.lock()) {
+			tasks.push_back(task);
+			task->wake();
+		}
+	}
+	waking = false;
+}
 
 } // namespace
 
@@ -787,10 +1026,39 @@ bool IsDownloadableMedia(Data::Media *media) {
 	return false;
 }
 
+void MarkBatchDownloaded(not_null<const HistoryItem*> item) {
+	LoadDownloadedMarks();
+	auto &state = DownloadedMarks();
+	const auto key = DownloadedKey(item);
+	auto changed = false;
+	if (!state.keys.contains(key)) {
+		state.keys.insert(key);
+		changed = true;
+		QDir().mkpath(cWorkingDir() + u"tdata"_q);
+		auto file = QFile(DownloadedFilePath());
+		if (file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+			file.write(key.toUtf8());
+			file.write("\n", 1);
+		}
+	}
+	if (changed) {
+		RefreshDownloadedMark(item);
+	}
+}
+
+bool IsBatchDownloaded(not_null<const HistoryItem*> item) {
+	LoadDownloadedMarks();
+	return DownloadedMarks().keys.contains(DownloadedKey(item));
+}
+
 class Manager::Impl : public base::has_weak_ptr {
 public:
 	explicit Impl(not_null<Main::Session*> session)
 	: _session(session) {
+	}
+
+	~Impl() {
+		_shared->shuttingDown = true;
 	}
 
 	void enqueue(
@@ -812,6 +1080,7 @@ public:
 					impl->taskFinished(finished);
 				}
 			});
+		_shared->registerTask(task);
 		_activeTasks.push_back(std::move(task));
 		_activeTasks.back()->start();
 		if (onStarted) {

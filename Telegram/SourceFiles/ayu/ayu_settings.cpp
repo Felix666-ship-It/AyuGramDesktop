@@ -681,6 +681,13 @@ void AyuSettings::setBatchDownloadSubfoldersForSeparateGroups(bool val) {
 	save();
 }
 
+void AyuSettings::setBatchDownloadConcurrency(int val) {
+	val = std::clamp(val, 1, 64);
+	if (_batchDownloadConcurrency.current() == val) return;
+	_batchDownloadConcurrency = val;
+	save();
+}
+
 void AyuSettings::setDefaultWeChatThemeApplied(bool val) {
 	if (_defaultWeChatThemeApplied.current() == val) return;
 	_defaultWeChatThemeApplied = val;
@@ -1115,6 +1122,7 @@ void to_json(nlohmann::json &j, const AyuSettings &s) {
 		{"removeMessageTail", s._removeMessageTail.current()},
 		{"disableNotificationsDelay", s._disableNotificationsDelay.current()},
 		{"batchDownloadSubfoldersForSeparateGroups", s._batchDownloadSubfoldersForSeparateGroups.current()},
+		{"batchDownloadConcurrency", s._batchDownloadConcurrency.current()},
 		{"defaultWeChatThemeApplied", s._defaultWeChatThemeApplied.current()},
 		{"localPremium", s._localPremium.current()},
 		{"showChannelReactions", s._showChannelReactions.current()},
@@ -1221,6 +1229,10 @@ void from_json(const nlohmann::json &j, AyuSettings &s) {
 	s._removeMessageTail = j.value("removeMessageTail", defaults._removeMessageTail.current());
 	s._disableNotificationsDelay = j.value("disableNotificationsDelay", true);
 	s._batchDownloadSubfoldersForSeparateGroups = j.value("batchDownloadSubfoldersForSeparateGroups", false);
+	s._batchDownloadConcurrency = std::clamp(
+		j.value("batchDownloadConcurrency", 12),
+		1,
+		64);
 	s._defaultWeChatThemeApplied = j.value("defaultWeChatThemeApplied", false);
 	s._localPremium = j.value("localPremium", defaults._localPremium.current());
 	s._showChannelReactions = j.value("showChannelReactions", defaults._showChannelReactions.current());

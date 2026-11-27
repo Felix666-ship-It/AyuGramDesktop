@@ -12,6 +12,7 @@
 #include "rpl/producer.h"
 #include "rpl/variable.h"
 
+#include <algorithm>
 #include <map>
 #include <unordered_set>
 
@@ -291,6 +292,9 @@ public:
 	[[nodiscard]] bool removeMessageTail() const { return _removeMessageTail.current(); }
 	[[nodiscard]] bool disableNotificationsDelay() const { return _disableNotificationsDelay.current(); }
 	[[nodiscard]] bool batchDownloadSubfoldersForSeparateGroups() const { return _batchDownloadSubfoldersForSeparateGroups.current(); }
+	[[nodiscard]] int batchDownloadConcurrency() const {
+		return std::clamp(_batchDownloadConcurrency.current(), 1, 64);
+	}
 	[[nodiscard]] bool defaultWeChatThemeApplied() const { return _defaultWeChatThemeApplied.current(); }
 	[[nodiscard]] bool localPremium() const { return _localPremium.current(); }
 	[[nodiscard]] bool showChannelReactions() const { return _showChannelReactions.current(); }
@@ -380,6 +384,7 @@ public:
 	void setRemoveMessageTail(bool val);
 	void setDisableNotificationsDelay(bool val);
 	void setBatchDownloadSubfoldersForSeparateGroups(bool val);
+	void setBatchDownloadConcurrency(int val);
 	void setDefaultWeChatThemeApplied(bool val);
 	void setLocalPremium(bool val);
 	void setShowChannelReactions(bool val);
@@ -493,6 +498,8 @@ public:
 	[[nodiscard]] rpl::producer<bool> removeMessageTailChanges() const { return _removeMessageTail.changes(); }
 	[[nodiscard]] rpl::producer<bool> disableNotificationsDelayValue() const { return _disableNotificationsDelay.value(); }
 	[[nodiscard]] rpl::producer<bool> disableNotificationsDelayChanges() const { return _disableNotificationsDelay.changes(); }
+	[[nodiscard]] rpl::producer<int> batchDownloadConcurrencyValue() const { return _batchDownloadConcurrency.value(); }
+	[[nodiscard]] rpl::producer<int> batchDownloadConcurrencyChanges() const { return _batchDownloadConcurrency.changes(); }
 	[[nodiscard]] rpl::producer<bool> localPremiumValue() const { return _localPremium.value(); }
 	[[nodiscard]] rpl::producer<bool> localPremiumChanges() const { return _localPremium.changes(); }
 	[[nodiscard]] rpl::producer<bool> showChannelReactionsValue() const { return _showChannelReactions.value(); }
@@ -652,6 +659,7 @@ private:
 	rpl::variable<bool> _removeMessageTail = false;
 	rpl::variable<bool> _disableNotificationsDelay = true;
 	rpl::variable<bool> _batchDownloadSubfoldersForSeparateGroups = false;
+	rpl::variable<int> _batchDownloadConcurrency = 12;
 	rpl::variable<bool> _defaultWeChatThemeApplied = false;
 	rpl::variable<bool> _localPremium = false;
 	rpl::variable<bool> _showChannelReactions = true;
