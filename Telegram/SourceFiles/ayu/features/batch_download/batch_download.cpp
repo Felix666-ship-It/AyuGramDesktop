@@ -14,6 +14,8 @@
 #include "data/data_document.h"
 #include "data/data_document_media.h"
 #include "data/data_groups.h"
+#include "data/data_peer.h"
+#include "history/history.h"
 #include "history/history_item.h"
 #include "data/data_download_manager.h"
 #include "data/data_file_origin.h"
@@ -181,11 +183,11 @@ void LoadDownloadedMarks() {
 	const auto userId = history->session().userId().bare;
 	const auto peerId = history->peer->id.value;
 	const auto groupId = item->groupId();
-	if (groupId.value != 0) {
+	if (!groupId.empty()) {
 		return u"g:%1:%2:%3"_q
 			.arg(userId)
 			.arg(peerId)
-			.arg(groupId.value);
+			.arg(groupId.raw());
 	}
 	return u"m:%1:%2:%3"_q
 		.arg(userId)
@@ -216,6 +218,7 @@ struct SharedState {
 	rpl::lifetime lifetime;
 	int activeDownloads = 0;
 	bool waking = false;
+	bool wakeAgain = false;
 	bool shuttingDown = false;
 
 	SharedState();
@@ -368,7 +371,7 @@ private:
 		std::shared_ptr<Data::PhotoMedia> photoMedia;
 		int photoAttempts = 0;
 		uint64 generation = 0;
-		int64 lastProgress = -1;
+		int64 lastProgress = 0;
 		crl::time lastProgressAt = 0;
 		int retryCount = 0;
 		bool retrying = false;
@@ -743,6 +746,8 @@ private:
 		current->lastProgressAt = crl::now();
 		current->state = State::None;
 		current->starting = false;
+		current->photoAttempts = 0;
+		current->photoMedia.reset();
 		current->retrying = false;
 		if (current->kind == Kind::Document) {
 			prepareDocument(current);
@@ -833,34 +838,41 @@ private:
 		}
 		_advancing = true;
 		while (!_finished && _index < int(_ids.size())) {
-			if (!_shared->tryAcquire()) {
-				break;
-			}
-			const auto id = _ids[_index++];
+			const auto id = _ids[_index];
 			const auto item = _session->data().message(id);
 			if (!item) {
+				++_index;
 				++_skipped;
-				_shared->release();
 				continue;
 			}
 			const auto media = item->media();
 			if (!media) {
+				++_index;
 				++_skipped;
-				_shared->release();
 				continue;
 			}
+			const auto photo = media->photo();
+			const auto document = media->document();
+			const auto isPhoto = photo && !photo->isNull();
+			const auto isDocument = !isPhoto
+				&& document
+				&& IsDownloadableDocument(document);
+			if (!isPhoto && !isDocument) {
+				++_index;
+				++_skipped;
+				continue;
+			}
+			if (!_shared->tryAcquire()) {
+				break;
+			}
+			++_index;
 			auto folder = _folder;
 			if (_mode == Mode::Direct) {
 				folder = _directFolder;
 			} else {
 				folder = _groupFolders.value(GroupKey(item), _folder);
 			}
-			if (const auto photo = media->photo()) {
-				if (photo->isNull()) {
-					++_skipped;
-					_shared->release();
-					continue;
-				}
+			if (isPhoto) {
 				auto current = std::make_shared<Current>();
 				current->kind = Kind::Photo;
 				current->id = id;
@@ -871,12 +883,7 @@ private:
 				current->lastProgressAt = crl::now();
 				_currents.push_back(current);
 				preparePhoto(current);
-			} else if (const auto document = media->document()) {
-				if (!IsDownloadableDocument(document)) {
-					++_skipped;
-					_shared->release();
-					continue;
-				}
+			} else {
 				auto current = std::make_shared<Current>();
 				current->kind = Kind::Document;
 				current->id = id;
@@ -890,9 +897,6 @@ private:
 					+ DocumentExtension(document);
 				_currents.push_back(current);
 				prepareDocument(current);
-			} else {
-				++_skipped;
-				_shared->release();
 			}
 		}
 		_advancing = false;
@@ -989,18 +993,25 @@ void SharedState::registerTask(const std::shared_ptr<Task> &task) {
 }
 
 void SharedState::wakeTasks() {
-	if (waking || shuttingDown) {
+	if (shuttingDown) {
+		return;
+	}
+	if (waking) {
+		wakeAgain = true;
 		return;
 	}
 	waking = true;
-	auto pending = std::move(tasks);
-	tasks.clear();
-	for (const auto &weak : pending) {
-		if (const auto task = weak.lock()) {
-			tasks.push_back(task);
-			task->wake();
+	do {
+		wakeAgain = false;
+		auto pending = std::move(tasks);
+		tasks.clear();
+		for (const auto &weak : pending) {
+			if (const auto task = weak.lock()) {
+				tasks.push_back(task);
+				task->wake();
+			}
 		}
-	}
+	} while (wakeAgain && !shuttingDown);
 	waking = false;
 }
 

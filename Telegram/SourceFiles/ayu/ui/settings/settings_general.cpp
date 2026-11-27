@@ -221,9 +221,6 @@ void BuildQoLToggles(SectionBuilder &builder, AyuSectionBuilder &ayu) {
 		.indexToValue = [](int index) {
 			return index + 1;
 		},
-		.onChanged = [](int value) {
-			AyuSettings::getInstance().setBatchDownloadConcurrency(value);
-		},
 		.onFinalChanged = [](int value) {
 			AyuSettings::getInstance().setBatchDownloadConcurrency(value);
 		},
